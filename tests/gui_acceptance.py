@@ -392,6 +392,19 @@ def scenario():
                 clashes.append((cid1, kovac_keys[cid1], cid2, kovac_keys[cid2]))
     check("no two Kovač shortcuts collide or prefix one another", not clashes, clashes)
 
+    # -- numeric fields take '.' or ',' as the decimal point regardless of locale ---------
+    from kovac import editor
+    sb = editor.DoubleSpinBox()
+    sb.setDecimals(4)
+    sb.setRange(-1e6, 1e6)
+    got = {}
+    for t in ("3.5", "3,5", "-12,75"):
+        sb.lineEdit().setText(t)
+        sb.interpretText()
+        got[t] = sb.value()
+    check("a value field takes either decimal point, under this locale (%s)" % sb.locale().name(),
+          got == {"3.5": 3.5, "3,5": 3.5, "-12,75": -12.75}, (sb.locale().decimalPoint(), got))
+
     # -- regeneration + undo --------------------------------------------------------------
     box = doc.addObject("Part::Box", "Loose")   # outside our command layer, no recompute call
     box.Length = 7

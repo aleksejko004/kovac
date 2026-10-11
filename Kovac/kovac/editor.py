@@ -144,6 +144,22 @@ def _kind(fp):
     return fp.Kind if getattr(fp, "Kind", "") in SCHEMAS else type(fp.Proxy).kind
 
 
+class DoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    """A QDoubleSpinBox that takes '.' or ',' as the decimal point while typing, regardless of
+    which one the locale actually uses -- plain Qt only accepts that one and silently drops
+    the other as a stray character (typing "3.5" under a comma locale becomes 35)."""
+
+    def _other(self):
+        return "," if self.locale().decimalPoint() == "." else "."
+
+    def validate(self, text, pos):
+        state, _, p = super().validate(text.replace(self._other(), self.locale().decimalPoint()), pos)
+        return state, text, p            # keep what was actually typed on screen
+
+    def valueFromText(self, text):
+        return super().valueFromText(text.replace(self._other(), self.locale().decimalPoint()))
+
+
 # ---------------------------------------------------------------- value field
 
 class ValueField(QtWidgets.QLineEdit):
@@ -550,7 +566,7 @@ class Editor(QtWidgets.QWidget):
             form.addRow(label, w)
             self.fields = getattr(self, "fields", []) + [(prop, w)]
         elif kind in ("int", "float"):
-            w = QtWidgets.QSpinBox() if kind == "int" else QtWidgets.QDoubleSpinBox()
+            w = QtWidgets.QSpinBox() if kind == "int" else DoubleSpinBox()
             w.setRange(1 if kind == "int" else 1e-6, 10000 if kind == "int" else 1e6)
             if kind == "float":
                 w.setDecimals(4)
@@ -573,7 +589,7 @@ class Editor(QtWidgets.QWidget):
         elif kind == "vector":
             box, spins = QtWidgets.QHBoxLayout(), []
             for i, c in enumerate("xyz"):
-                s = QtWidgets.QDoubleSpinBox()
+                s = DoubleSpinBox()
                 s.setRange(-1e6, 1e6)
                 s.setDecimals(3)
                 s.setValue(getattr(fp, prop)[i])
@@ -587,7 +603,7 @@ class Editor(QtWidgets.QWidget):
             box, spins = QtWidgets.QHBoxLayout(), []
             pl = getattr(fp, prop)
             for c, v in zip(("x", "y", "z", "rot Z°"), (pl.Base.x, pl.Base.y, pl.Base.z, pl.Rotation.Angle * 57.29577951308232)):
-                s = QtWidgets.QDoubleSpinBox()
+                s = DoubleSpinBox()
                 s.setRange(-1e6, 1e6)
                 s.setPrefix(c + " ")
                 s.setValue(v)
