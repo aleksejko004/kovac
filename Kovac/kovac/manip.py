@@ -13,7 +13,7 @@ from PySide import QtCore
 from kovac import model, navigation, overlay, palette, topo
 
 V = App.Vector
-HIT_PX = 14
+HIT_PX = 20
 
 
 def _extrude_axis(fp):
@@ -35,12 +35,29 @@ def _pull_axis(fp):
     return p, f.normalAt(*f.Surface.parameter(p))
 
 
+def _convex(e, f1, f2, at):
+    """Whether the edge between f1 and f2 is an outside (convex) one: step from the edge into
+    f1, across the edge -- if that step runs against f2's outward normal, the faces fold away
+    from each other around the material, as on a box corner."""
+    t = e.tangentAt(e.Curve.parameter(at))
+    n1 = f1.normalAt(*f1.Surface.parameter(at))
+    n2 = f2.normalAt(*f2.Surface.parameter(at))
+    d = n1.cross(t)
+    if d.Length < 1e-9:
+        return True
+    d.normalize()
+    eps = max(e.Length * 1e-3, 1e-3)
+    if not f1.isInside(at + d * eps, eps * 0.1, True):
+        d = -d
+    return n2.dot(d) < 0
+
+
 def _edge_group_axis(fp):
-    """First edge of the first (default) group: its midpoint, and outward along the bisector
-    of its two adjacent faces -- the direction the fillet or chamfer actually grows into, so
-    dragging the arrow out reads as 'more radius' the way dragging the extrude arrow out reads
-    as 'more length'. Only the default group gets an arrow; a second value group (add_group)
-    is edited in the panel instead, same as today."""
+    """First edge of the first (default) group: its midpoint, and along the bisector of its
+    two adjacent faces -- into the material on an outside edge (rounding it off removes
+    material there), out into the corner on an inside edge (rounding it fills material in).
+    Only the default group gets an arrow; a second value group (add_group) is edited in the
+    panel instead."""
     import Part
     try:
         state = model.input_state(fp)
@@ -52,15 +69,22 @@ def _edge_group_axis(fp):
             continue
         e = edges[0]
         mid = e.valueAt((e.FirstParameter + e.LastParameter) / 2)
+        faces = state[bid].shape.ancestorsOfType(e, Part.Face)[:2]
         n = V(0, 0, 0)
-        for f in state[bid].shape.ancestorsOfType(e, Part.Face)[:2]:
+        for f in faces:
             try:
                 n += f.normalAt(*f.Surface.parameter(mid))
             except Exception:
                 pass
         if n.Length < 1e-9:
             return None
-        return mid, n.normalize()
+        n.normalize()
+        try:
+            if len(faces) == 2 and _convex(e, faces[0], faces[1], mid):
+                n = -n
+        except Exception:
+            pass
+        return mid, n
     return None
 
 
@@ -73,7 +97,16 @@ class Arrow:
         self.ed, self.prop, self.axis_fn = ed, prop, axis_fn
         self.node, self.axis = None, None
         self.field = None
+        self.px = None
         navigation.hooks.insert(0, self)       # the arrow wins over region picks under it
+        self.zoom_watch = QtCore.QTimer(interval=150)   # head size is in screen pixels: redraw after a zoom
+        self.zoom_watch.timeout.connect(self._zoomed)
+        self.zoom_watch.start()
+
+    def _zoomed(self):
+        it = navigation.install(Gui.activeView()) if Gui.activeView() is not None else None
+        if it is not None and self.px and abs(it.px_size() - self.px) > self.px * 0.05:
+            self.refresh()
 
     def value(self):
         return getattr(self.ed.fp, self.prop).Value
@@ -85,8 +118,9 @@ class Arrow:
             return
         o, n = self.axis
         tip = o + n * self.value()
-        size = max(abs(self.value()) * 0.06, 0.6)
-        self.node = overlay.add(overlay.arrow_node(o, tip, palette.accent(), size))
+        it = navigation.install(Gui.activeView())
+        px = self.px = it.px_size() if it is not None else 0.05
+        self.node = overlay.add(overlay.arrow_node(o, tip, palette.accent(), px))
         self.place_field(tip)
 
     def place_field(self, tip):
@@ -139,6 +173,7 @@ class Arrow:
         it.snap_marker.hide()
 
     def detach(self):
+        self.zoom_watch.stop()
         overlay.remove(self.node)
         if self.field is not None:
             self.field.hide()

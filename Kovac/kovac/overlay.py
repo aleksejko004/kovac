@@ -80,32 +80,43 @@ def shape_node(shape, color, transparency=0.75, pickable=False):
     return sep
 
 
-def arrow_node(origin, tip, color, radius):
-    """Line from origin to tip with a cone at the tip, drawn on top of the model."""
+def arrow_node(origin, tip, color, px):
+    """A solid shaft from origin to tip with a cone at the tip, drawn on top of the model. Only
+    the length follows the value: shaft and head widths are fixed in screen size (px = world
+    size of one pixel), so a short value still gives a full-size, easy-to-grab arrow."""
     coin = _coin()
     sep = coin.SoAnnotation()
     mat = coin.SoBaseColor()
     mat.rgb = rgb(color)
     sep.addChild(mat)
-    style = coin.SoDrawStyle()
-    style.lineWidth = 3
-    sep.addChild(style)
-    crd = coin.SoCoordinate3()
-    crd.point.setValues(0, 2, [[origin.x, origin.y, origin.z], [tip.x, tip.y, tip.z]])
-    sep.addChild(crd)
-    sep.addChild(coin.SoLineSet())
     d = tip - origin
-    if d.Length > 1e-9:
+    if d.Length < 1e-9:
+        return sep
+    rot = App.Rotation(V(0, 1, 0), d)
+    head_r, head_h, shaft_r = 11 * px, 32 * px, 2.5 * px
+    shaft_len = max(d.Length - head_h, 0.0)
+    if shaft_len > 0:
+        mid = origin + d.normalize() * (shaft_len / 2)
+        shaft = coin.SoSeparator()
         tr = coin.SoTransform()
-        rot = App.Rotation(V(0, 1, 0), d)
-        tr.translation = (tip.x, tip.y, tip.z)
+        tr.translation = (mid.x, mid.y, mid.z)
         tr.rotation.setValue(*rot.Q)
-        cone_sep = coin.SoSeparator()
-        cone_sep.addChild(tr)
-        cone = coin.SoCone()
-        cone.bottomRadius, cone.height = radius, radius * 2.6
-        cone_sep.addChild(cone)
-        sep.addChild(cone_sep)
+        cyl = coin.SoCylinder()
+        cyl.radius, cyl.height = shaft_r, shaft_len
+        shaft.addChild(tr)
+        shaft.addChild(cyl)
+        sep.addChild(shaft)
+    base = origin + d.normalize() * shaft_len
+    centre = base + d.normalize() * (min(head_h, d.Length) / 2)
+    head = coin.SoSeparator()
+    tr = coin.SoTransform()
+    tr.translation = (centre.x, centre.y, centre.z)
+    tr.rotation.setValue(*rot.Q)
+    cone = coin.SoCone()
+    cone.bottomRadius, cone.height = head_r, min(head_h, d.Length)
+    head.addChild(tr)
+    head.addChild(cone)
+    sep.addChild(head)
     return sep
 
 
