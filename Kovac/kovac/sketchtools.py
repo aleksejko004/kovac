@@ -6,6 +6,10 @@
 - Polygon around a circle: FreeCAD's regular polygon (corners on the construction circle),
   turned into the circumscribed one (sides touching the circle), so the drawn radius is the
   inner radius.
+- Midpoint: FreeCAD's sketcher has no constraint of its own that ties a point to the middle of
+  a line or arc. A Symmetric constraint between the curve's own two endpoints, about the point,
+  is exactly that (the point is forced to be their mirror centre) -- the point just needs to
+  not also be driving the curve itself, or the solver is free to move the curve instead.
 """
 import math
 
@@ -16,6 +20,10 @@ import Sketcher
 from PySide import QtCore
 
 _state = {"chain": False, "around": False, "count": 0, "start": 0, "first": None, "done": set()}
+# Curve geometry whose endpoints (PosId 1 = start, 2 = end) a midpoint can be taken between.
+# A circle or full ellipse has no start/end (PosId 3 is its centre, a different thing).
+_HAS_ENDPOINTS = {"Part::GeomLineSegment", "Part::GeomArcOfCircle", "Part::GeomArcOfEllipse",
+                  "Part::GeomArcOfHyperbola", "Part::GeomArcOfParabola", "Part::GeomBSplineCurve"}
 
 
 def circumscribe(sk, circle):
@@ -82,6 +90,40 @@ def polygon_around():
     sk = _edited_sketch()
     _state.update(around=True, start=len(sk.Geometry) if sk else 0)
     commands.run("Sketcher_CreateRegularPolygon")
+
+
+def add_midpoint(sk, point_geoid, point_posid, line_geoid):
+    """Constrain point (point_geoid, point_posid) to the midpoint of line_geoid's own two
+    endpoints. line_geoid's geometry must have distinct start/end points (checked by the
+    caller; not true of a circle or full ellipse, which have none)."""
+    sk.addConstraint(Sketcher.Constraint("Symmetric", line_geoid, 1, line_geoid, 2, point_geoid, point_posid))
+
+
+def midpoint():
+    """Kovac_ConstrainMidpoint: select one point (a free point, an endpoint of another curve,
+    ...) and one line/arc, in either order, then constrain the point to the line's midpoint."""
+    from kovac import commands
+    sk = _edited_sketch()
+    if sk is None:
+        return
+    point_ref, line_ref = None, None
+    for sel in Gui.Selection.getSelectionEx(sk.Document.Name):
+        if sel.Object is not sk:
+            continue
+        for name in sel.SubElementNames:
+            if name.startswith("Vertex") and point_ref is None:
+                gid, pid = sk.getGeoVertexIndex(int(name[len("Vertex"):]))
+                if gid >= 0 and pid in (1, 2, 3):
+                    point_ref = (gid, pid)
+            elif name.startswith("Edge") and line_ref is None:
+                gid = int(name[len("Edge"):]) - 1
+                if 0 <= gid < len(sk.Geometry) and sk.Geometry[gid].TypeId in _HAS_ENDPOINTS:
+                    line_ref = gid
+    if point_ref is None or line_ref is None or point_ref[0] == line_ref:
+        commands.report("Midpoint: select a point and a line or arc (not its own endpoint), then Midpoint.")
+        return
+    with commands.transaction("Midpoint constraint", sk.Document):
+        add_midpoint(sk, point_ref[0], point_ref[1], line_ref)
 
 
 def _edited_sketch():

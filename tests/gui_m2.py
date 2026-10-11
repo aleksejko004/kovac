@@ -246,11 +246,12 @@ def scenario():
     bar = mw.findChild(QtWidgets.QToolBar, "kovacSketchBar")
     acts = {a.objectName(): a for a in bar.findChildren(QtGui.QAction) if a.objectName().startswith(("Sketcher_", "Kovac_"))}
     want = {"Sketcher_CreateLine", "Sketcher_CreateRectangle", "Sketcher_CreateCircle", "Sketcher_Dimension",
-            "Sketcher_ConstrainCoincident", "Sketcher_ConstrainHorizontal", "Sketcher_ConstrainTangent", "Sketcher_Trimming"}
+            "Sketcher_ConstrainCoincident", "Sketcher_ConstrainHorizontal", "Sketcher_ConstrainTangent",
+            "Sketcher_Trimming", "Kovac_ConstrainMidpoint"}
     ribbon_buttons = [b for b in bar.findChildren(QtWidgets.QToolButton) if b.defaultAction() in acts.values()]
     hidden = [b.defaultAction().objectName() for b in ribbon_buttons if not b.isVisible()]
-    check("the sketch ribbon shows every tool (51, variants behind arrows), none cut off",
-          want <= set(acts) and len(acts) >= 51 and len(ribbon_buttons) >= 30 and not hidden,
+    check("the sketch ribbon shows every tool (52, variants behind arrows), none cut off",
+          want <= set(acts) and len(acts) >= 52 and len(ribbon_buttons) >= 30 and not hidden,
           ("window %d px, screen %d px" % (mw.width(), mw.screen().availableGeometry().width()),
            len(acts), len(ribbon_buttons), hidden, sorted(want - set(acts))))
     yield 400                                 # the task panel watcher runs every 300 ms
@@ -408,6 +409,28 @@ def scenario():
     check("all sketch tools: clicks near grid points land exactly on them", not off_grid, off_grid)
     for _ in range(len(sk.Geometry) - n0):
         sk.delGeometry(n0)
+    sk.recompute()
+    # Midpoint constraint: select a point and a line on the ribbon, it snaps to the midpoint
+    import Sketcher
+    n4 = len(sk.Geometry)
+    li4 = sk.addGeometry(Part.LineSegment(V(2 * g, 2 * g, 0), V(8 * g, 2 * g, 0)), False)
+    pt4 = sk.addGeometry(Part.Point(V(4 * g, 5 * g, 0)), False)
+    sk.addConstraint(Sketcher.Constraint("DistanceX", li4, 1, 2 * g))
+    sk.addConstraint(Sketcher.Constraint("DistanceY", li4, 1, 2 * g))
+    sk.addConstraint(Sketcher.Constraint("DistanceX", li4, 2, 8 * g))
+    sk.addConstraint(Sketcher.Constraint("DistanceY", li4, 2, 2 * g))
+    sk.recompute()
+    vidx = next(i for i in range(1, 4 * len(sk.Geometry) + 2) if sk.getGeoVertexIndex(i) == (pt4, 1))
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(App.ActiveDocument.Name, sk.Name, "Edge%d" % (li4 + 1))
+    Gui.Selection.addSelection(App.ActiveDocument.Name, sk.Name, "Vertex%d" % vidx)
+    acts["Kovac_ConstrainMidpoint"].trigger()
+    yield 200
+    check("Midpoint constraint: a point picked with a line snaps to its midpoint",
+          abs(sk.Geometry[pt4].X - 5 * g) < 1e-6 and abs(sk.Geometry[pt4].Y - 2 * g) < 1e-6,
+          (sk.Geometry[pt4].X, sk.Geometry[pt4].Y))
+    for _ in range(len(sk.Geometry) - n4):
+        sk.delGeometry(n4)
     sk.recompute()
     cam.height.setValue(saved[0])
     cam.position.setValue(*saved[1])

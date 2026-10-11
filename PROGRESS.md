@@ -97,6 +97,7 @@ A batch of fixes and small features from the owner's own testing, worked item by
 |---|---|
 | Ground grid vanishing at some camera angles: Coin's own near/far auto-clipping starved by the same bounding-box exclusion that keeps "fit all" from zooming out for the grid | fixed; GUI regression test sweeps several tilts |
 | Hovering a command shows its shortcut; shortcuts added for the commands used most (sketch, the five Create ops, Fillet/Chamfer/Shell, Finish Sketch, Grid) | done; dropdown-nested and structurally-generated commands (primitives, patterns, reference geometry, the 26 views, the 9 filters) left without one, same reasoning as the existing shortcut-free commands |
+| Midpoint constraint (select a point and a line/arc, it snaps to the midpoint and stays there); mouse snapping lands on line and arc midpoints too, in sketches and on 3D faces | done (`Kovac_ConstrainMidpoint`, own icon); tested headless and in the sketch ribbon end to end |
 
 ## Next
 Milestone 3 — drawings, in the same look and logic.

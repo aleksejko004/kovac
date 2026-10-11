@@ -62,16 +62,25 @@ def nearest(it, pos, points, radius):
     return best and best[1:]
 
 
-def face_snap(it, pos, p, face):
-    """Where a point picked on a flat face lands: one of the face's corners, circle centres or
-    its centre (within POINT_PX); else the grid in the face's plane at half the ground step
-    (when close); else exactly p. Returns (point, kind) with kind "point", "grid" or None.
-    Without a view (it is None) the old world-space rule applies: the centre within 0.3 steps."""
+def face_points(face):
+    """Candidate snap points on a flat face: its corners, straight-edge midpoints, circle
+    centres, and its own centre."""
     import Part
+    return ([v.Point for v in face.Vertexes] + [face.CenterOfMass]
+            + [e.Curve.Center for e in face.Edges if isinstance(e.Curve, Part.Circle)]
+            + [(e.Vertexes[0].Point + e.Vertexes[-1].Point) * 0.5 for e in face.Edges
+               if isinstance(e.Curve, Part.Line) and len(e.Vertexes) == 2])
+
+
+def face_snap(it, pos, p, face):
+    """Where a point picked on a flat face lands: one of face_points(face) (within POINT_PX);
+    else the grid in the face's plane at half the ground step (when close); else exactly p.
+    Returns (point, kind) with kind "point", "grid" or None. Without a view (it is None) the
+    old world-space rule applies: the centre within 0.3 steps."""
     s = step()
     n = face.normalAt(*face.Surface.parameter(p))
     origin = n * face.Surface.Position.dot(n)
-    points = [v.Point for v in face.Vertexes] + [face.CenterOfMass] +         [e.Curve.Center for e in face.Edges if isinstance(e.Curve, Part.Circle)]
+    points = face_points(face)
     grid_pts = []
     if s:
         q = _snap(p, origin, n, s / 2)      # ponytail: half the visible step, so 5 mm stays reachable on a 2 mm grid
@@ -380,12 +389,17 @@ def _sketch_grid(vo, s):
 
 
 def _points(sk):
-    """Points worth landing on: ends of lines and arcs, centres, free points, the origin."""
+    """Points worth landing on: ends of lines and arcs, their midpoints, centres, free points,
+    the origin. A curve's midpoint here is the midpoint of its two endpoints (what Midpoint
+    constrains to), not a point on the curve itself -- the same thing for a line, the chord's
+    middle for an arc."""
     out = [V(0, 0, 0)]
     for g in sk.Geometry:
         for attr in ("StartPoint", "EndPoint", "Center"):
             if hasattr(g, attr):
                 out.append(getattr(g, attr))
+        if hasattr(g, "StartPoint") and hasattr(g, "EndPoint"):
+            out.append((g.StartPoint + g.EndPoint) * 0.5)
         if g.TypeId == "Part::GeomPoint":
             out.append(V(g.X, g.Y, g.Z))
     return out

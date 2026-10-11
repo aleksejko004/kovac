@@ -240,6 +240,8 @@ COMMANDS = [
      sketchtools.polyline, "polyline", ""),
     ("Kovac_PolygonAround", "Polygon around a circle", "Regular polygon whose sides touch the circle you draw (circumscribed)",
      sketchtools.polygon_around, "polygon_out", ""),
+    ("Kovac_ConstrainMidpoint", "Midpoint", "Select a point and a line or arc: constrain the point to its midpoint",
+     sketchtools.midpoint, "c_midpoint", "K, M"),
     ("Kovac_Delete", "Delete", "Delete the selection", delete, "delete", ""),
     ("Kovac_FinishSketch", "Finish Sketch", "Leave the sketch", sketchmode.finish, "finish", "Return"),
     ("Kovac_Extrude", "Extrude", "Pull a profile or a flat face into a solid", extrude, "extrude", "X"),

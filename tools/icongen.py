@@ -909,6 +909,13 @@ def c_symmetric(g):
     _dot(g, (19, 12), 2.4)
 
 
+def c_midpoint(g):
+    g.line((4, 18), (20, 6), g.t["icon_line"])
+    g.handle((4, 18))
+    g.handle((20, 6))
+    _dot(g, (12, 12), 3.2)
+
+
 def c_block(g):
     g.line((4, 19), (20, 5), g.t["icon_line"])
     g.poly(_rect2((8.5, 8.5), (15.5, 15.5)), fill=g.t["accent"], stroke=g.t["icon_line"], width=HAIR)
@@ -1222,7 +1229,8 @@ ICONS = {
     "offset": (offset, "sketch"), "sk_mirror": (sk_mirror, "sketch"), "sk_move": (sk_move, "sketch"), "sk_rotate": (sk_rotate, "sketch"),
     "sk_scale": (sk_scale, "sketch"), "sk_array": (sk_array, "sketch"), "construction": (construction, "sketch"), "project": (project, "sketch"),
     "carbon": (carbon, "sketch"), "sk_look": (sk_look, "sketch"), "sk_section": (sk_section, "sketch"), "dimension": (dimension, "sketch"),
-    "c_coincident": (c_coincident, "sketch"), "c_pointon": (c_pointon, "sketch"), "c_horizontal": (c_horizontal, "sketch"), "c_vertical": (c_vertical, "sketch"),
+    "c_coincident": (c_coincident, "sketch"), "c_pointon": (c_pointon, "sketch"), "c_midpoint": (c_midpoint, "sketch"),
+    "c_horizontal": (c_horizontal, "sketch"), "c_vertical": (c_vertical, "sketch"),
     "c_parallel": (c_parallel, "sketch"), "c_perpendicular": (c_perpendicular, "sketch"), "c_tangent": (c_tangent, "sketch"), "c_equal": (c_equal, "sketch"),
     "c_symmetric": (c_symmetric, "sketch"), "c_block": (c_block, "sketch"), "c_lock": (c_lock, "sketch"), "c_hdist": (c_hdist, "sketch"),
     "c_vdist": (c_vdist, "sketch"), "c_dist": (c_dist, "sketch"), "c_radius": (c_radius, "sketch"), "c_diameter": (c_diameter, "sketch"),

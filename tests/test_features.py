@@ -124,6 +124,39 @@ class Features(unittest.TestCase):
             self.assertAlmostEqual(((g.StartPoint + g.EndPoint) * 0.5 - c.Center).Length, 10, 6)    # sides touch it
             self.assertAlmostEqual((g.StartPoint - c.Center).Length, 10 / math.cos(PI / 6), 6)
 
+    def test_midpoint_constraint(self):
+        import Sketcher
+        from kovac import sketchtools
+        sk = self.doc.addObject("Sketcher::SketchObject", "Mid")
+        li = sk.addGeometry(Part.LineSegment(V(0, 0, 0), V(10, 0, 0)), False)
+        pt = sk.addGeometry(Part.Point(V(3, 3, 0)), False)
+        sk.addConstraint(Sketcher.Constraint("DistanceX", li, 1, 0.0))
+        sk.addConstraint(Sketcher.Constraint("DistanceY", li, 1, 0.0))
+        c_x2 = sk.addConstraint(Sketcher.Constraint("DistanceX", li, 2, 10.0))
+        sk.addConstraint(Sketcher.Constraint("DistanceY", li, 2, 0.0))
+        self.doc.recompute()
+        sketchtools.add_midpoint(sk, pt, 1, li)
+        self.doc.recompute()
+        self.assertAlmostEqual(sk.Geometry[pt].X, 5.0, 6)
+        self.assertAlmostEqual(sk.Geometry[pt].Y, 0.0, 6)
+        sk.setDatum(c_x2, 16.0)                              # the line grows
+        self.doc.recompute()
+        self.assertAlmostEqual(sk.Geometry[pt].X, 8.0, 6)    # the point follows its new midpoint
+        self.assertAlmostEqual(sk.Geometry[pt].Y, 0.0, 6)
+
+    def test_snap_candidates_include_midpoints(self):
+        from kovac import grid
+        sk = self.doc.addObject("Sketcher::SketchObject", "SnapPts")
+        sk.addGeometry(Part.LineSegment(V(0, 0, 0), V(10, 0, 0)), False)
+        sk.addGeometry(Part.ArcOfCircle(Part.Circle(V(20, 0, 0), V(0, 0, 1), 5), 0, PI), False)
+        self.doc.recompute()
+        pts = grid._points(sk)
+        self.assertIn(V(5, 0, 0), pts)                                       # the line's own midpoint
+        arc = sk.Geometry[1]
+        self.assertIn((arc.StartPoint + arc.EndPoint) * 0.5, pts)            # the arc's chord midpoint
+        face = Part.Face(Part.Wire(Part.makePolygon([V(0, 0, 0), V(10, 0, 0), V(10, 10, 0), V(0, 10, 0), V(0, 0, 0)])))
+        self.assertIn(V(5, 0, 0), grid.face_points(face))                    # a straight edge's own midpoint
+
     # ---- modify
     def test_fillet_and_chamfer(self):
         self.plate()
