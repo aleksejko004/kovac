@@ -68,6 +68,40 @@ class Features(unittest.TestCase):
         self.assertAlmostEqual(live_bodies(self.doc)[1].Shape.Volume, 25 * 10, 6)
         self.assertEqual(e2.ResolvedOperation, "New body")
 
+    def test_extrude_waits_for_a_pick_on_an_ambiguous_sketch(self):
+        """A sketch with one region extrudes with no picks (the common case stays one click);
+        with several, picking none is ambiguous and is reported, not silently merged."""
+        sk1 = sketch(self.doc, rect(0, 0, 10, 10), name="One")
+        self.ok(feature(self.doc, features.Extrude, Profile=sk1, Length=5))
+        self.vol(500, live_bodies(self.doc)[0])
+        sk2 = sketch(self.doc, rect(0, 0, 10, 10) + rect(20, 0, 30, 10), name="Two", constrain=False)
+        broken = feature(self.doc, features.Extrude, Profile=sk2, Length=5, Operation="New body")
+        self.assertIn("separate regions", broken.Status)
+        self.doc.removeObject(broken.Name)
+        from kovac import regions
+        rs = regions.of_sketch(sk2)
+        r = next(r for r in rs if r.point.x < 15)             # the first rectangle
+        picked = self.ok(feature(self.doc, features.Extrude, Profile=sk2, Length=5,
+                                 Regions=[r.key], RegionPoints=[r.point], Operation="New body"))
+        self.assertEqual(picked.ResolvedOperation, "New body")
+        self.assertAlmostEqual(live_bodies(self.doc)[1].Shape.Volume, 500, 4)
+
+    def test_region_picker_shows_nothing_chosen_when_ambiguous(self):
+        """The panel's own live region picker must agree with what _sketch_regions will
+        actually use, or clicking OK could silently extrude more than it shows as chosen."""
+        from types import SimpleNamespace
+        from kovac import regionpick, regions
+        sk1 = sketch(self.doc, rect(0, 0, 10, 10), name="RP1")
+        rs1 = regions.of_sketch(sk1)
+        rp1 = regionpick.RegionPicker.__new__(regionpick.RegionPicker)   # skip __init__: no Qt/navigation needed
+        rp1.ed = SimpleNamespace(fp=SimpleNamespace(Profile=sk1, Regions=[]))
+        self.assertEqual(rp1.chosen(rs1), {rs1[0].key})                 # one region: picking none is picking it
+        sk2 = sketch(self.doc, rect(0, 0, 10, 10) + rect(20, 0, 30, 10), name="RP2", constrain=False)
+        rs2 = regions.of_sketch(sk2)
+        rp2 = regionpick.RegionPicker.__new__(regionpick.RegionPicker)
+        rp2.ed = SimpleNamespace(fp=SimpleNamespace(Profile=sk2, Regions=[]))
+        self.assertEqual(rp2.chosen(rs2), set())                        # two regions: picking none picks nothing
+
     def test_revolve_sweep_loft(self):
         xy = sketch(self.doc, rect(10, 0, 20, 10), name="Ring")
         self.ok(feature(self.doc, features.Revolve, Profile=xy, Axis="Y", Angle=360))

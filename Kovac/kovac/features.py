@@ -24,7 +24,13 @@ def _sketch_regions(fp, sketch):
         raise ValueError("%s has no closed profile. Close the outline in the sketch." % sketch.Label)
     if fp.Regions:
         return regions.pick(found, list(fp.Regions), [tuple(p) for p in getattr(fp, "RegionPoints", [])])
-    return regions.default(found)
+    auto = regions.default(found)
+    # A sketch with one region (holes aside) has nothing to choose between, so picking none
+    # is as good as picking it -- the common case stays a one-click extrude. More than one and
+    # picking none is ambiguous: say so rather than silently combining every one of them.
+    if len(auto) > 1:
+        raise ValueError("%s has %d separate regions. Click the ones to use." % (sketch.Label, len(auto)))
+    return auto
 
 
 def profiles(fp, state):

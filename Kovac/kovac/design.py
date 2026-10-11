@@ -61,10 +61,15 @@ def last_sketch():
 # ---------------------------------------------------------------- commands
 
 def extrude():
+    """The panel's own region picker (regionpick.RegionPicker) stays live once it is open, so
+    a sketch with more than one region doesn't need picks made in advance: Profile=sk just
+    makes its regions clickable there; features.Extrude reports "N separate regions" until one
+    is picked, rather than combining all of them. A single-region sketch still needs no pick
+    at all, in the panel or before it -- there is nothing to choose between."""
     from kovac import regionpick
     sk = selected_sketch() or (None if picks("Face") else last_sketch())
     faces = [] if sk else picks("Face")
-    chosen = regionpick.hover.take(sk)          # profile areas clicked in the view
+    chosen = regionpick.hover.take(sk)          # profile areas clicked in the view, before Extrude ran
     editor.start(features.Extrude, Profile=sk, ProfileFaces=faces, Regions=list(chosen), RegionPoints=list(chosen.values()))
 
 
