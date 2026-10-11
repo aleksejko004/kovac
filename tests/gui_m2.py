@@ -594,6 +594,22 @@ def scenario():
     check("clicking the bend picks an edge", picked and picked[0].split(".")[-1].startswith("Edge"), picked)
     command("Kovac_Fillet")
     yield 300
+    # the panel has its own drag arrow for the radius, at the picked edge, same as Extrude's
+    from kovac import navigation
+    fillet_ed = editor.current()
+    arrow = next((h for h in navigation.hooks if type(h).__name__ == "Arrow"), None)
+    check("fillet panel has a drag arrow for its radius", arrow is not None and arrow.axis is not None,
+          arrow and arrow.axis)
+    if arrow is not None and arrow.axis is not None:
+        o, n = arrow.axis
+        a0 = to_qt(o + n * arrow.value())
+        mouse(QtCore.QEvent.MouseButtonPress, a0, QtCore.Qt.LeftButton, QtCore.Qt.LeftButton)
+        for k in range(1, 4):
+            mouse(QtCore.QEvent.MouseMove, to_qt(o + n * (arrow.value() + k)), QtCore.Qt.NoButton, QtCore.Qt.LeftButton)
+            yield 40
+        mouse(QtCore.QEvent.MouseButtonRelease, to_qt(o + n * (arrow.value() + 3)), QtCore.Qt.LeftButton, QtCore.Qt.NoButton)
+        yield 150
+        check("dragging the fillet arrow changes its radius", fillet_ed.fp.Radius.Value > 1, fillet_ed.fp.Radius.Value)
     type_into(editor_field("Radius"), "3 mm")
     yield 300
     press(ok_button())

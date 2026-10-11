@@ -35,7 +35,37 @@ def _pull_axis(fp):
     return p, f.normalAt(*f.Surface.parameter(p))
 
 
-ARROWS = {"Extrude": ("Length", _extrude_axis), "FacePull": ("Distance", _pull_axis)}
+def _edge_group_axis(fp):
+    """First edge of the first (default) group: its midpoint, and outward along the bisector
+    of its two adjacent faces -- the direction the fillet or chamfer actually grows into, so
+    dragging the arrow out reads as 'more radius' the way dragging the extrude arrow out reads
+    as 'more length'. Only the default group gets an arrow; a second value group (add_group)
+    is edited in the panel instead, same as today."""
+    import Part
+    try:
+        state = model.input_state(fp)
+        groups = fp.Proxy.edges_for(fp, state, "Edges", True)
+    except Exception:
+        return None
+    for bid, edges in groups.items():
+        if not edges:
+            continue
+        e = edges[0]
+        mid = e.valueAt((e.FirstParameter + e.LastParameter) / 2)
+        n = V(0, 0, 0)
+        for f in state[bid].shape.ancestorsOfType(e, Part.Face)[:2]:
+            try:
+                n += f.normalAt(*f.Surface.parameter(mid))
+            except Exception:
+                pass
+        if n.Length < 1e-9:
+            return None
+        return mid, n.normalize()
+    return None
+
+
+ARROWS = {"Extrude": ("Length", _extrude_axis), "FacePull": ("Distance", _pull_axis),
+          "Fillet": ("Radius", _edge_group_axis), "Chamfer": ("Distance", _edge_group_axis)}
 
 
 class Arrow:
