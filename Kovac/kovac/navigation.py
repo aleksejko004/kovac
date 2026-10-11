@@ -60,6 +60,15 @@ def in_edit():
     return bool(gd and gd.getInEdit())
 
 
+def camera_focus(cam):
+    """The point cam is looking at (its orbit centre): position, stepped back along view
+    direction by focalDistance. Works for both camera kinds; it is the most robust 'what is
+    this view centred on' a caller can get without a model or a successful ray cast."""
+    pos3 = V(*cam.position.getValue().getValue())
+    rot = App.Rotation(*cam.orientation.getValue().getValue())
+    return pos3 - rot.multVec(V(0, 0, 1)) * cam.focalDistance.getValue()
+
+
 class Band(QtWidgets.QWidget):
     """Window (solid accent) vs crossing (dashed green) rectangle."""
 
@@ -231,10 +240,7 @@ class Interactor(QtCore.QObject):
                 box.add(shape.BoundBox)
         if box.isValid():
             return box.Center
-        cam = self.camera()
-        pos3 = V(*cam.position.getValue().getValue())
-        rot = App.Rotation(*cam.orientation.getValue().getValue())
-        return pos3 - rot.multVec(V(0, 0, 1)) * cam.focalDistance.getValue()
+        return camera_focus(self.camera())
 
     def px_size(self):
         """World length of one screen pixel at the focal plane."""
@@ -547,9 +553,7 @@ class Interactor(QtCore.QObject):
                     box.add(s.Object.Shape.BoundBox)
             pivot = box.Center
         else:
-            pos3 = V(*cam.position.getValue().getValue())
-            rot = App.Rotation(*cam.orientation.getValue().getValue())
-            pivot = pos3 - rot.multVec(V(0, 0, 1)) * cam.focalDistance.getValue()
+            pivot = camera_focus(cam)
         self.show_marker(pivot)
         return pivot
 

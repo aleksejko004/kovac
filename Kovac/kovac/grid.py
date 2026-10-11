@@ -12,6 +12,7 @@ from kovac import palette
 V = App.Vector
 TARGET_PX = 28          # minor grid spacing aims for this many screen pixels
 _state = {"node": None, "step": None, "timer": None, "view": None}
+_clip_saved = {}        # view id -> Coin's own auto-clipping strategy, to give back on Grid off
 
 
 def enabled():
@@ -247,6 +248,7 @@ def refresh(force=False):
         _sketch_grid(Gui.ActiveDocument.getInEdit(), s)
     if not enabled() or editing:            # a sketch draws its own grid
         remove()
+        _restore_clip(it)
         _state["step"] = s
         return
     # the grid follows the view: centred under it, big enough to fill it, so it never runs out
@@ -255,6 +257,7 @@ def refresh(force=False):
     reach = max(it.vp.width(), it.vp.height()) * it.px_size()
     half = max(s * 30, reach * 1.6)
     half = min(math.ceil(half / (5 * s)) * 5 * s, s * 400)
+    _clip_for(it, c, half)             # every tick: the grid reaches past what auto-clip would allow
     moved = _state.get("centre") is None or max(abs(c[0] - _state["centre"][0]), abs(c[1] - _state["centre"][1])) > half * 0.2
     if not force and s == _state["step"] and _state["node"] is not None and _state["view"] is view and not moved:
         return
@@ -264,13 +267,74 @@ def refresh(force=False):
     _state["step"], _state["view"], _state["centre"] = s, view, c
 
 
+def _clip_for(it, centre, half):
+    """Push the near/far clip planes out to cover the grid, not just the model.
+
+    The grid sits in a SoSkipBoundingGroup (EXCLUDE_BBOX) so 'fit all' never zooms out to
+    show it -- but Coin's automatic near/far clipping (Gui::View3DInventorViewer runs it every
+    frame, strategy BOUNDING_BOX by default) walks the very same scene bounding box, so it
+    never saw the grid either. It then clips the far plane right at the model's edge; at some
+    camera tilts that clip plane crosses the ground close to the camera, and the grid vanishes
+    beyond it, with the cut line's position and angle on screen changing with the view. We take
+    over clipping while the grid is on: auto-clipping off, near/far sized from the camera to a
+    sphere around the model and the grid's own footprint, each tick.
+    Keyed by the cached Interactor, not the view: FreeCAD can hand back a fresh Python wrapper
+    for the same view on each Gui.activeView() call (navigation.install() exists for the same
+    reason), so the view object itself is not a safe dict key across calls."""
+    from pivy import coin
+    view = it.view
+    rm = view.getViewer().getSoRenderManager()
+    if it not in _clip_saved:
+        _clip_saved[it] = rm.getAutoClipping()
+    rm.setAutoClipping(coin.SoRenderManager.NO_AUTO_CLIPPING)
+    cam = view.getCameraNode()
+    pos = V(*cam.position.getValue().getValue())
+    box = App.BoundBox()
+    doc = App.ActiveDocument
+    for o in doc.Objects if doc else []:
+        vo = getattr(o, "ViewObject", None)
+        shape = getattr(o, "Shape", None)
+        if vo is not None and vo.Visibility and shape is not None and not shape.isNull():
+            box.add(shape.BoundBox)
+    cx, cy = centre
+    for x in (cx - half, cx + half):
+        for y in (cy - half, cy + half):
+            box.add(V(x, y, 0))
+    if not box.isValid():
+        box.add(pos)
+    radius = (V(box.XMax, box.YMax, box.ZMax) - box.Center).Length
+    d = (pos - box.Center).Length
+    near, far = max(d - radius, 1e-3), d + radius
+    if far <= near:
+        far = near + 1.0
+    cam.nearDistance.setValue(near)
+    cam.farDistance.setValue(far)
+
+
+def _restore_clip(it):
+    """Give Coin back its own auto-clipping once the grid is off or a sketch is open."""
+    if it not in _clip_saved:
+        return
+    try:
+        it.view.getViewer().getSoRenderManager().setAutoClipping(_clip_saved.pop(it))
+    except Exception:
+        _clip_saved.pop(it, None)
+
+
 def _ground_centre(it):
-    """Point of the ground (z = 0) under the middle of the view; the focal point if the view is edge-on."""
+    """Point of the ground (z = 0) under the middle of the view; the camera's look-at point if
+    the view is edge-on. Near a grazing angle the ray-ground intersection runs arbitrarily far
+    away (dividing by a near-zero d.z), which used to carry the whole grid off screen with it
+    -- the camera's own focus point stays close to the model at any tilt, so the grid never
+    drifts out of view just because the view angle got shallow."""
     from kovac import overlay
     from PySide import QtCore
     o, d = overlay.ray(it, QtCore.QPoint(it.vp.width() // 2, it.vp.height() // 2))
     p = overlay.hit_plane(o, d, V(0, 0, 0), V(0, 0, 1)) if abs(d.z) > 0.05 else None
-    return p if p is not None else o
+    if p is not None:
+        return p
+    from kovac import navigation
+    return navigation.camera_focus(it.camera())
 
 
 def remove():

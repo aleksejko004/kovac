@@ -273,6 +273,34 @@ def scenario():
     views.go(view(), views.view_rotation(views.ISO), fit=True)
     yield 500
 
+    # -- ground grid: the far clip plane always reaches the grid, at any tilt (regression) --
+    # Coin's own auto-clipping sizes the far plane from the scene bounding box, and the grid
+    # is deliberately excluded from that box (so 'fit all' never zooms out to show it) -- which
+    # used to starve the clip planes too, cutting the grid off at the model's edge. Where that
+    # cut lands on screen moves with the camera, so it read as "the grid disappears at some
+    # angles". Sweep several tilts and check the far plane still reaches every grid corner.
+    from kovac import grid
+    rot0 = view().getCameraOrientation()
+    vd0 = V(*view().getViewDirection())
+    local_fwd = rot0.inverted().multVec(vd0)
+    short_clip = []
+    for elev in (2, 6, 12, 25, 40):      # degrees above the horizon
+        target = V(1, -1, math.sin(math.radians(elev))).normalize()
+        view().setCameraOrientation(App.Rotation(local_fwd, target))
+        grid.refresh(force=True)
+        s = grid._state["step"]
+        cx, cy = grid._state["centre"]
+        reach = max(it.vp.width(), it.vp.height()) * it.px_size()
+        half = min(math.ceil(max(s * 30, reach * 1.6) / (5 * s)) * 5 * s, s * 400)
+        pos = V(*view().getCameraNode().position.getValue().getValue())
+        corner_dist = max((pos - V(cx + sx * half, cy + sy * half, 0)).Length for sx in (-1, 1) for sy in (-1, 1))
+        far = view().getCameraNode().farDistance.getValue()
+        if far < corner_dist - 1e-6:
+            short_clip.append((elev, round(far, 1), round(corner_dist, 1)))
+    check("ground grid is never clipped away by the camera's far plane, at any tilt", not short_clip, short_clip)
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 400
+
     # -- window / crossing / tangent / pick list ------------------------------------------
     bb = body.Shape.BoundBox
     corners = [to_qt(V(x, y, z)) for x in (bb.XMin, bb.XMax) for y in (bb.YMin, bb.YMax) for z in (bb.ZMin, bb.ZMax)]
