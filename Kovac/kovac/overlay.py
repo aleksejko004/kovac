@@ -80,20 +80,26 @@ def shape_node(shape, color, transparency=0.75, pickable=False):
     return sep
 
 
-def arrow_node(origin, tip, color, px):
+def arrow_node(origin, tip, color, px, lead=0.0):
     """A solid shaft from origin to tip with a cone at the tip, drawn on top of the model. Only
     the length follows the value: shaft and head widths are fixed in screen size (px = world
-    size of one pixel), so a short value still gives a full-size, easy-to-grab arrow."""
+    size of one pixel), so a short value still gives a full-size, easy-to-grab arrow. lead
+    starts the shaft that much further back, for an arrow coming in from outside a part."""
     coin = _coin()
     sep = coin.SoAnnotation()
-    mat = coin.SoBaseColor()
-    mat.rgb = rgb(color)
+    mat = coin.SoMaterial()                 # lit, but glowing: reads as the accent colour from any side
+    c = rgb(color)
+    mat.diffuseColor = c
+    mat.emissiveColor = tuple(x * 0.65 for x in c)
     sep.addChild(mat)
     d = tip - origin
     if d.Length < 1e-9:
         return sep
+    if lead > 0:
+        origin = origin - d.normalize() * lead
+        d = tip - origin
     rot = App.Rotation(V(0, 1, 0), d)
-    head_r, head_h, shaft_r = 11 * px, 32 * px, 2.5 * px
+    head_r, head_h, shaft_r = 16 * px, 46 * px, 4 * px
     shaft_len = max(d.Length - head_h, 0.0)
     if shaft_len > 0:
         mid = origin + d.normalize() * (shaft_len / 2)

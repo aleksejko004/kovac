@@ -13,7 +13,7 @@ from PySide import QtCore
 from kovac import model, navigation, overlay, palette, topo
 
 V = App.Vector
-HIT_PX = 20
+HIT_PX = 26
 
 
 def _extrude_axis(fp):
@@ -120,8 +120,18 @@ class Arrow:
         tip = o + n * self.value()
         it = navigation.install(Gui.activeView())
         px = self.px = it.px_size() if it is not None else 0.05
-        self.node = overlay.add(overlay.arrow_node(o, tip, palette.accent(), px))
+        lead = 90 * px if self._into_part(o, n * (1 if self.value() >= 0 else -1), px) else 0.0
+        self.node = overlay.add(overlay.arrow_node(o, tip, palette.accent(), px, lead))
         self.place_field(tip)
+
+    def _into_part(self, o, d, px):
+        """Whether the arrow heads into material (a fillet on an outside edge, a cut): it then
+        starts well outside the part, reading as an arrow coming in rather than a stub."""
+        try:
+            p = o + d.normalize() * max(px * 3, 1e-3)
+            return any(b.shape.isInside(p, 1e-6, False) for b in model.input_state(self.ed.fp).values())
+        except Exception:
+            return False
 
     def place_field(self, tip):
         view = Gui.activeView()
