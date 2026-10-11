@@ -16,7 +16,7 @@ import Part
 from PySide import QtCore, QtWidgets
 
 import kovac
-from kovac import commands, model, navigation, overlay, palette
+from kovac import commands, model, navigation, overlay, palette, topo
 
 V = App.Vector
 ARROW_PX, RING_PX, HIT_PX = 150, 108, 12
@@ -37,11 +37,19 @@ class Triad:
     rotations: which axes get a turning handle; translations: which get an arrow."""
 
     def __init__(self, target, translations=(0, 1, 2), rotations=(0, 1, 2)):
-        self.t, self.translations, self.rotations = target, translations, rotations
+        self.t, self._handles = target, (translations, rotations)
         self.node, self.drag, self.label = None, None, None
         self.in_edit = True                 # takes clicks inside a sketch too (only on its own handles)
         navigation.hooks.insert(0, self)
         self.redraw()
+
+    @property
+    def translations(self):
+        return self.t.handles()[0] if hasattr(self.t, "handles") else self._handles[0]
+
+    @property
+    def rotations(self):
+        return self.t.handles()[1] if hasattr(self.t, "handles") else self._handles[1]
 
     # drawing -------------------------------------------------------------------
     def _px(self):
@@ -236,6 +244,63 @@ class BodyTarget:
 
     def end(self):
         self.ed.preview()
+
+
+class FaceTarget(BodyTarget):
+    """Move Face: a flat face pushes or pulls along its normal and tilts about the two
+    directions in its plane; a round face also slides sideways and tilts its axis."""
+
+    def _face(self):
+        try:
+            return topo.element(model.input_state(self.ed.fp), self.ed.fp.Face)[1]
+        except Exception:
+            return None
+
+    def _local(self, f):
+        if isinstance(f.Surface, Part.Plane):
+            n = f.normalAt(*f.Surface.parameter(f.CenterOfMass))
+            centre = f.CenterOfMass
+        else:
+            s = f.Surface
+            n = s.Axis.normalize()
+            ts = [(v.Point - s.Center).dot(n) for v in f.Vertexes] or [0.0]
+            centre = s.Center + n * ((min(ts) + max(ts)) / 2)
+        u = n.cross(V(0, 0, 1)) if abs(n.z) < 0.9 else n.cross(V(1, 0, 0))
+        u.normalize()
+        return centre, [u, n.cross(u), n]
+
+    def handles(self):
+        f = self._face()
+        if f is None:
+            return (), ()
+        return ((2,) if isinstance(f.Surface, Part.Plane) else (0, 1, 2)), (0, 1)
+
+    def frame(self):
+        fp = self.ed.fp
+        f = self._face() if fp.Face else None
+        if f is None:
+            return None
+        centre, axes = self._local(f)
+        if getattr(self, "pivot_for", None) != fp.Face:
+            self.pivot_for = fp.Face
+            fp.Pivot = centre
+        m = App.Placement(fp.Move.Base, fp.Move.Rotation, fp.Pivot)
+        self.axes = [m.Rotation.multVec(a) for a in axes]
+        return m.multVec(fp.Pivot), self.axes
+
+    def translate(self, i, d):
+        m = App.Placement(self.start)
+        m.Base = m.Base + self.axes_start[i] * d
+        self.ed.set("Move", m)
+
+    def rotate(self, i, ang):
+        m = App.Placement(self.start)
+        m.Rotation = App.Rotation(self.axes_start[i], ang).multiply(m.Rotation)
+        self.ed.set("Move", m)
+
+    def begin(self):
+        BodyTarget.begin(self)
+        self.axes_start = [V(a) for a in self.frame()[1]]
 
 
 def effective(fp):
@@ -434,9 +499,9 @@ def command():
     faces = [model.pick_ref(s.Object, sub) for s in sel for sub in s.SubElementNames if sub.split(".")[-1].startswith("Face")]
     faces = [f for f in faces if f]
     kinds = set(getattr(navigation.select_filter, "kinds", None) or ())
-    if faces and "face" in kinds and "body" not in kinds:       # the Faces filter: push or pull the face
-        from kovac import features
-        return editor.start(features.FacePull, Face=faces[0])
+    if faces and "face" in kinds and "body" not in kinds:       # the Faces filter: move or tilt the face
+        from kovac import modify
+        return editor.start(modify.MoveFace, Face=faces[0])
     ed = editor.start(_transform(), Bodies=design.selected_bodies())
     if ed.fp.Bodies:
         ed.fp.Pivot = bodies_centre(ed.fp)

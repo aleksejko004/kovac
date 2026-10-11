@@ -66,6 +66,7 @@ SCHEMAS = {
     "Draft": [("picks", "Faces", "Faces", ("Face",)), ("pick", "Neutral", "Neutral face", ("Face",)),
               ("value", "Angle", "Angle"), ("bool", "Reverse", "Reverse pull")],
     "FacePull": [("pick", "Face", "Face", ("Face",)), ("value", "Distance", "Distance")],
+    "MoveFace": [("pick", "Face", "Face", ("Face",)), ("move", "Move", "Move by")],
     "DeleteFace": [("picks", "Faces", "Faces", ("Face",))],
     "Combine": [("body", "Target", "Target body"), ("bodies", "Tools", "Tool bodies"), ("enum", "Operation", "Operation"),
                 ("bool", "KeepTools", "Keep tools")],

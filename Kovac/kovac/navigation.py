@@ -743,6 +743,10 @@ class _SelectionHighlight:
         except Exception:
             pass
 
+    def slotRecomputedDocument(self, _doc):     # the selected shape changed: wash the new one, not the old
+        if self.node is not None:
+            QtCore.QTimer.singleShot(0, self._refresh)
+
 
 _sel_highlight = None
 
@@ -752,6 +756,7 @@ def install_selection_highlight():
     if _sel_highlight is None:
         _sel_highlight = _SelectionHighlight()
         Gui.Selection.addObserver(_sel_highlight)
+        App.addDocumentObserver(_sel_highlight)
 
 
 def install(view=None):

@@ -15,7 +15,7 @@ FOLDERS = (("body", "Bodies"), ("sketch", "Sketches"), ("reference", "Reference 
            ("joint", "Joints"), ("analysis", "Analyses"))
 CONTAINERS = ("App::Part", "Assembly::AssemblyObject")
 _FEATURE_PROXIES = {"Extrude", "Revolve", "Sweep", "Loft", "Primitive", "Hole", "Fillet", "Chamfer", "Shell", "Draft",
-                    "FacePull", "DeleteFace", "Combine", "SplitBody", "Transform", "Scale", "Mirror", "Pattern",
+                    "FacePull", "MoveFace", "DeleteFace", "Combine", "SplitBody", "Transform", "Scale", "Mirror", "Pattern",
                     "Thread", "Import", "RemoveBody"}
 ICONS = {"body": "body", "sketch": "sketch", "component": "component", "joint": "joint", "analysis": "section",
          "reference": "plane"}

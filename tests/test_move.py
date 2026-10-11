@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """Move: bodies about their centre, construction planes set free, sketch points and lines (headless)."""
+import math
 import unittest
 
 import FreeCAD as App
@@ -62,3 +63,52 @@ class Move(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MoveFaceTests(unittest.TestCase):
+    def setUp(self):
+        self.doc = App.newDocument("MF")
+        self.sk = sketch(self.doc, rect(0, 0, 40, 20))
+        feature(self.doc, features.Extrude, Profile=self.sk, Length=10)
+        self.body = live_bodies(self.doc)[0]
+
+    def tearDown(self):
+        App.closeDocument(self.doc.Name)
+
+    def face(self, pred):
+        from helpers import face_ref
+        return face_ref(self.doc, self.body, pred)
+
+    def test_top_face_tilts(self):
+        import math
+        from helpers import normal
+        top = self.face(lambda f: normal(f).z > 0.99)
+        mf = feature(self.doc, modify.MoveFace, Face=top, Pivot=V(20, 10, 10),
+                     Move=App.Placement(V(), App.Rotation(V(0, 1, 0), 10)))
+        self.assertEqual(mf.Status, "", mf.Status)
+        b = live_bodies(self.doc)[0].Shape
+        self.assertTrue(b.isValid())
+        self.assertAlmostEqual(b.Volume, 8000, 3)                       # tilted about its middle: same volume
+        self.assertAlmostEqual(b.BoundBox.ZMax, 10 + 20 * math.tan(math.radians(10)), 4)
+
+    def test_hole_slides_and_tilts(self):
+        from kovac import model as mdl
+        cut = sketch(self.doc, [("circle", (10, 10), 3)], name="H")
+        feature(self.doc, features.Extrude, Profile=cut, Length=10, Operation="Cut")
+        self.body = live_bodies(self.doc)[0]
+        before = self.body.Shape.Volume
+        wall = self.face(lambda f: isinstance(f.Surface, Part.Cylinder))
+        mf = feature(self.doc, modify.MoveFace, Face=wall, Pivot=V(10, 10, 5), Move=App.Placement(V(8, 0, 0), App.Rotation()))
+        self.assertEqual(mf.Status, "", mf.Status)
+        b = live_bodies(self.doc)[0].Shape
+        self.assertAlmostEqual(b.Volume, before, 3)
+        self.assertTrue(b.isInside(V(10, 10, 5), 1e-6, False))          # the old place filled in
+        self.assertFalse(b.isInside(V(18, 10, 5), 1e-6, False))         # the hole is here now
+        mf.Move = App.Placement(V(8, 0, 0), App.Rotation(V(0, 1, 0), 20))
+        mdl.commit(self.doc)
+        self.assertEqual(mf.Status, "", mf.Status)
+        b = live_bodies(self.doc)[0].Shape
+        self.assertTrue(b.isValid())
+        for z in (0.2, 9.8):                                            # still open at both ends
+            x = 18 + (z - 5) * math.tan(math.radians(20))
+            self.assertFalse(b.isInside(V(x, 10, z), 1e-6, False), z)
