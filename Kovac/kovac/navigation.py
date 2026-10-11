@@ -209,6 +209,11 @@ class Interactor(QtCore.QObject):
         exactly there. Not while panning, not with Alt held."""
         if not in_edit():
             return False
+        if self.drag and self.drag[0] == "hook":
+            return False                         # a tool's own drag (Move's triad) does its own snapping
+        if ev.type() == QtCore.QEvent.MouseButtonPress and any(
+                getattr(h, "in_edit", False) and h.handle_at(self, ev.position().toPoint()) is not None for h in hooks):
+            return False
         if ev.modifiers() & QtCore.Qt.AltModifier:
             self.snap_marker.hide()
             return False
@@ -336,6 +341,11 @@ class Interactor(QtCore.QObject):
                 self.drag = ("gesture", pos, pos, ev.globalPosition().toPoint())
                 return True
         if in_edit():
+            if button == "Left" and not mods:
+                for h in list(hooks):            # a tool that works inside a sketch (Move's triad) goes first
+                    if getattr(h, "in_edit", False) and h.press(self, pos):
+                        self.drag = ("hook", pos, pos, h)
+                        return True
             return False
         if button == "Right" and not mods:
             from kovac import radial

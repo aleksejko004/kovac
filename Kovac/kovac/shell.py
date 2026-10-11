@@ -19,10 +19,11 @@ MODES = ("Design", "Drawing", "Make", "Simulate", "Render")
 # an entry that is a list becomes one dropdown button
 GROUPS = {
     "Design": [("Sketch", ["Kovac_Sketch", "Kovac_Curve3D"]),
+               ("Move", ["Kovac_Move"]),
                ("Form", ["Kovac_Extrude", "Kovac_Revolve", "Kovac_Sweep", "Kovac_Loft", "Kovac_Hole", "Kovac_Thread",
                          ["Kovac_Box", "Kovac_Cylinder", "Kovac_Sphere", "Kovac_Cone", "Kovac_Torus"]]),
                ("Shape", ["Kovac_FacePull", "Kovac_Fillet", "Kovac_Chamfer", "Kovac_Shell", "Kovac_Draft", "Kovac_DeleteFace",
-                          ["Kovac_Combine", "Kovac_Split"], ["Kovac_Move", "Kovac_Scale", "Kovac_Mirror"],
+                          ["Kovac_Combine", "Kovac_Split"], ["Kovac_Scale", "Kovac_Mirror"],
                           ["Kovac_PatternRect", "Kovac_PatternCirc"]]),
                ("Reference", [["Kovac_Plane", "Kovac_Axis", "Kovac_Point"]]),
                ("Check", ["Kovac_Measure", ["Kovac_MassProperties", "Kovac_Interference", "Kovac_Section", "Kovac_DraftAnalysis"]]),

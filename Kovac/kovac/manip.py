@@ -194,6 +194,10 @@ class Arrow:
 
 def attach(ed):
     from kovac.editor import _kind
+    if _kind(ed.fp) == "Move":
+        from kovac import move
+        ed.hooks = getattr(ed, "hooks", []) + [move.Triad(move.BodyTarget(ed))]
+        return
     spec = ARROWS.get(_kind(ed.fp))
     if spec:
         ed.hooks = getattr(ed, "hooks", []) + [Arrow(ed, *spec)]

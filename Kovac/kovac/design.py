@@ -186,7 +186,8 @@ def split():
 
 
 def move():
-    editor.start(modify.Transform, Bodies=selected_bodies())
+    from kovac import move as mv
+    mv.command()
 
 
 def scale():
@@ -271,7 +272,8 @@ COMMANDS = [
     ("Kovac_DeleteFace", "Delete Face", "Remove faces and heal the gap", delete_face, "deleteface", ""),
     ("Kovac_Combine", "Combine", "Join, cut or intersect bodies", combine, "combine", ""),
     ("Kovac_Split", "Split Body", "Cut a body in two with a plane or face", split, "split", ""),
-    ("Kovac_Move", "Move / Copy", "Move or copy bodies (recorded in the history)", move, "move", ""),
+    ("Kovac_Move", "Move / Copy", "Move bodies, construction planes, sketch points and lines, or (Faces filter) a face",
+     move, "move", "Shift+M"),
     ("Kovac_Scale", "Scale", "Scale bodies", scale, "scale", ""),
     ("Kovac_Mirror", "Mirror", "Mirror bodies", mirror, "mirror", ""),
     ("Kovac_PatternRect", "Rectangular Pattern", "Repeat features or bodies in rows", pattern("Rectangular"), "pattern", ""),

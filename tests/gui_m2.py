@@ -901,6 +901,51 @@ def scenario():
           p1b.z > 2 and App.ActiveDocument.UndoNames[:1] == ["Move curve point"], (p1, p1b, App.ActiveDocument.UndoNames[:2]))
     curve3d.finish()
 
+    # -- Move: the triad on a body -- drag the X arrow, then the turning handle about Z --
+    from kovac import move
+    App.newDocument("MoveTest")
+    yield 300
+    skm = sketchmode.create("XY")
+    for a, b in ((V(0, 0, 0), V(40, 0, 0)), (V(40, 0, 0), V(40, 20, 0)), (V(40, 20, 0), V(0, 20, 0)), (V(0, 20, 0), V(0, 0, 0))):
+        skm.addGeometry(Part.LineSegment(a, b))
+    sketchmode.finish()
+    yield 300
+    editor.start(features.Extrude, Profile=skm, Length=10).accept()
+    yield 300
+    bm = bodies()[0]
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(bm)
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 500
+    command("Kovac_Move")
+    yield 400
+    edm = editor.current()
+    tri = next(h for h in edm.hooks if isinstance(h, move.Triad))
+    itm = navigation.install()
+    p, axes = tri.t.frame()
+    pxm = itm.px_size()
+    sc = lambda q: QtCore.QPointF(*itm.qt(view().getPointOnViewport(q)))   # noqa: E731
+
+    def drag_vp(a, b):
+        L = QtCore.Qt.LeftButton
+        evs = [(QtCore.QEvent.MouseButtonPress, a, L)] + [(QtCore.QEvent.MouseMove, a + (b - a) * k / 12, L) for k in range(1, 13)] + \
+              [(QtCore.QEvent.MouseButtonRelease, b, QtCore.Qt.NoButton)]
+        for t, q, held in evs:
+            QtWidgets.QApplication.sendEvent(vp(), QtGui.QMouseEvent(t, q, QtCore.QPointF(vp().mapToGlobal(q.toPoint())),
+                                                                     L if t != QtCore.QEvent.MouseMove else QtCore.Qt.NoButton, held, QtCore.Qt.NoModifier))
+    drag_vp(sc(p + axes[0] * move.ARROW_PX * pxm * 0.8), sc(p + axes[0] * (move.ARROW_PX * pxm * 0.8 + 20)))
+    yield 200
+    slid = V(edm.fp.Move.Base)
+    ring = tri._ring(p + slid, axes[0], axes[1], move.RING_PX * pxm)
+    drag_vp(sc(ring[8]), sc(ring[16]) + (sc(ring[16]) - sc(ring[8])) * 0.2)
+    yield 200
+    turned = math.degrees(edm.fp.Move.Rotation.Angle)
+    check("Move: dragging the X arrow slides the body along X, the Z handle turns it",
+          slid.x > 5 and abs(slid.y) < 1e-9 and abs(slid.z) < 1e-9 and turned >= 5 and
+          (edm.fp.Move.Rotation.Axis - V(0, 0, 1)).Length < 1e-6, (slid, turned, edm.fp.Move.Rotation.Axis))
+    edm.accept()
+    yield 300
+
 def run(gen):
     try:
         delay = next(gen)

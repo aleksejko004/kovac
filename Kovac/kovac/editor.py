@@ -606,19 +606,9 @@ class Editor(QtWidgets.QWidget):
                 s.valueChanged.connect(lambda _v, p=prop, sp=spins: self.set(p, App.Vector(*[x.value() for x in sp])))
             form.addRow(label, box)
         elif kind == "move":
-            box, spins = QtWidgets.QHBoxLayout(), []
-            pl = getattr(fp, prop)
-            for c, v in zip(("x", "y", "z", "rot Z°"), (pl.Base.x, pl.Base.y, pl.Base.z, pl.Rotation.Angle * 57.29577951308232)):
-                s = DoubleSpinBox()
-                s.setRange(-1e6, 1e6)
-                s.setPrefix(c + " ")
-                s.setValue(v)
-                spins.append(s)
-                box.addWidget(s)
-            for s in spins:
-                s.valueChanged.connect(lambda _v, p=prop, sp=spins: self.set(
-                    p, App.Placement(App.Vector(sp[0].value(), sp[1].value(), sp[2].value()), App.Rotation(App.Vector(0, 0, 1), sp[3].value()))))
-            form.addRow(label, box)
+            row = MoveRow(self, prop)
+            self.fields = getattr(self, "fields", []) + [(prop, row)]
+            form.addRow(label, row)
         elif kind == "place":
             hint = QtWidgets.QLabel("<i>click a face to place it there</i>")
             row = PlaceRow(self, prop, hint)
@@ -803,6 +793,39 @@ class Editor(QtWidgets.QWidget):
         self.close_panel()
         self.restore_rollback()
         model.commit(self.doc)
+
+
+class MoveRow(QtWidgets.QWidget):
+    """Move by: an offset x, y, z and a turn about X, Y, Z (degrees, about the bodies' centre);
+    kept in step with the on-canvas triad."""
+
+    def __init__(self, ed, prop):
+        super().__init__()
+        self.ed, self.prop = ed, prop
+        grid = QtWidgets.QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.spins = []
+        for k, name in enumerate(("x", "y", "z", "turn X°", "turn Y°", "turn Z°")):
+            sp = DoubleSpinBox()
+            sp.setRange(-1e6, 1e6)
+            sp.setDecimals(2 if k < 3 else 1)
+            sp.setPrefix(name + " ")
+            sp.valueChanged.connect(self.push)
+            self.spins.append(sp)
+            grid.addWidget(sp, k // 3, k % 3)
+        self.show_value()
+
+    def show_value(self):
+        pl = getattr(self.ed.fp, self.prop)
+        yaw, pitch, roll = pl.Rotation.toEuler()
+        for sp, v in zip(self.spins, (pl.Base.x, pl.Base.y, pl.Base.z, roll, pitch, yaw)):
+            sp.blockSignals(True)
+            sp.setValue(v)
+            sp.blockSignals(False)
+
+    def push(self, *_):
+        v = [sp.value() for sp in self.spins]
+        self.ed.set(self.prop, App.Placement(App.Vector(*v[:3]), App.Rotation(v[5], v[4], v[3])))
 
 
 class PlaceRow(_ViewportPoints, _Row):

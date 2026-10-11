@@ -473,12 +473,15 @@ class Transform(model.Feature):
         fp.addProperty("App::PropertyStringList", "Bodies", "Move", "body ids")
         fp.addProperty("App::PropertyPlacement", "Move", "Move", "translation and rotation")
         fp.addProperty("App::PropertyBool", "Copy", "Move", "keep the original")
+        fp.addProperty("App::PropertyVector", "Pivot", "Move", "the turn is about this point")
 
     def apply(self, fp, state):
+        from kovac import move
+        m = move.effective(fp)
         for k, bid in enumerate(fp.Bodies):
             if bid not in state:
                 raise topo.Broken("a body to move no longer exists")
-            moved = state[bid].transformed(fp.Move)
+            moved = state[bid].transformed(m)
             if fp.Copy:
                 moved = topo.Body(moved.shape, [t + "@" + fp.Name for t in moved.tags])
                 state[model.new_body_id(fp, k)] = moved
