@@ -266,7 +266,7 @@ def register():
         lambda: _ui["tree"].widget().save_view(), active=commands.has_doc)
     add("Kovac_FitAll", "Fit all", "Zoom to show the whole model", view(lambda v: v.fitAll()), icon=kovac.icon("zoom"))
     add("Kovac_Grid", "Grid and snap", "Show the grid; clicked points and sketch drawing snap to it",
-        _lazy("grid", "toggle"), icon=kovac.icon("grid"))
+        _lazy("grid", "toggle"), icon=kovac.icon("grid"), key="F3")
     add("Kovac_OrbitMode", "Free / turntable orbit", "Switch between free and turntable (around Z) orbit", _toggle_orbit_mode)
     for kind in ("Orbit", "Pan", "Zoom"):
         add("Kovac_LeftDrag_" + kind, kind, "Left-drag %ss (click again for selection)" % kind.lower(),

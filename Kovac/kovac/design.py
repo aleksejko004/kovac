@@ -225,46 +225,54 @@ def point():
 
 
 COMMANDS = [
-    # id, label, tip, fn, icon
-    ("Kovac_Sketch", "Sketch", "Sketch on a plane or a flat face", sketchmode.start, "sketch"),
-    ("Kovac_Line", "Line", "Draw lines (picks a plane first when not sketching)", line, "line"),
+    # id, label, tip, fn, icon, key
+    # Shortcuts avoid: names already in use (Kovac_Search = S, Kovac_NewDesign = Ctrl+N, ...);
+    # every bare letter FreeCAD's own sketcher binds while a sketch is being edited; and every
+    # letter it uses as the *first* key of a "G, R"-style sequence (G, K, Q, Z), since a bare
+    # key clashes with a sequence just as much as a direct repeat does -- Qt can't tell a
+    # complete one-key shortcut from the start of a longer one. Commands that only ever show
+    # inside a dropdown variant (primitives, patterns, reference geometry, Combine/Split,
+    # Move/Mirror) are left without one, same as the 26 standard views: a key per entry there
+    # would exhaust the keyboard for little gain.
+    ("Kovac_Sketch", "Sketch", "Sketch on a plane or a flat face", sketchmode.start, "sketch", "F2"),
+    ("Kovac_Line", "Line", "Draw lines (picks a plane first when not sketching)", line, "line", ""),
     ("Kovac_Polyline", "Polyline", "Connected lines; type each length and angle (Esc or right click ends)",
-     sketchtools.polyline, "polyline"),
+     sketchtools.polyline, "polyline", ""),
     ("Kovac_PolygonAround", "Polygon around a circle", "Regular polygon whose sides touch the circle you draw (circumscribed)",
-     sketchtools.polygon_around, "polygon_out"),
-    ("Kovac_Delete", "Delete", "Delete the selection", delete, "delete"),
-    ("Kovac_FinishSketch", "Finish Sketch", "Leave the sketch", sketchmode.finish, "finish"),
-    ("Kovac_Extrude", "Extrude", "Pull a profile or a flat face into a solid", extrude, "extrude"),
-    ("Kovac_Revolve", "Revolve", "Turn a profile around an axis", revolve, "revolve"),
-    ("Kovac_Sweep", "Sweep", "Move a profile along a path", sweep, "sweep"),
-    ("Kovac_Loft", "Loft", "Blend between profiles", loft, "loft"),
-    ("Kovac_Hole", "Hole", "Drilled, counterbored, countersunk or tapped holes (ISO metric)", hole, "hole"),
-    ("Kovac_Thread", "Thread", "Mark a cylindrical face as threaded", thread, "thread"),
-    ("Kovac_Box", "Box", "Box primitive", primitive("Box"), "box"),
-    ("Kovac_Cylinder", "Cylinder", "Cylinder primitive", primitive("Cylinder"), "cylinder"),
-    ("Kovac_Sphere", "Sphere", "Sphere primitive", primitive("Sphere"), "sphere"),
-    ("Kovac_Cone", "Cone", "Cone primitive", primitive("Cone"), "cone"),
-    ("Kovac_Torus", "Torus", "Torus primitive", primitive("Torus"), "torus"),
+     sketchtools.polygon_around, "polygon_out", ""),
+    ("Kovac_Delete", "Delete", "Delete the selection", delete, "delete", ""),
+    ("Kovac_FinishSketch", "Finish Sketch", "Leave the sketch", sketchmode.finish, "finish", "Return"),
+    ("Kovac_Extrude", "Extrude", "Pull a profile or a flat face into a solid", extrude, "extrude", "X"),
+    ("Kovac_Revolve", "Revolve", "Turn a profile around an axis", revolve, "revolve", "R"),
+    ("Kovac_Sweep", "Sweep", "Move a profile along a path", sweep, "sweep", "U"),
+    ("Kovac_Loft", "Loft", "Blend between profiles", loft, "loft", "O"),
+    ("Kovac_Hole", "Hole", "Drilled, counterbored, countersunk or tapped holes (ISO metric)", hole, "hole", "B"),
+    ("Kovac_Thread", "Thread", "Mark a cylindrical face as threaded", thread, "thread", "Y"),
+    ("Kovac_Box", "Box", "Box primitive", primitive("Box"), "box", ""),
+    ("Kovac_Cylinder", "Cylinder", "Cylinder primitive", primitive("Cylinder"), "cylinder", ""),
+    ("Kovac_Sphere", "Sphere", "Sphere primitive", primitive("Sphere"), "sphere", ""),
+    ("Kovac_Cone", "Cone", "Cone primitive", primitive("Cone"), "cone", ""),
+    ("Kovac_Torus", "Torus", "Torus primitive", primitive("Torus"), "torus", ""),
     ("Kovac_FacePull", "Face Pull", "Move a face, change a fillet, extrude a sketch, or fillet an edge — by what you picked",
-     face_pull, "facepull"),
-    ("Kovac_Fillet", "Fillet", "Round edges", fillet, "fillet"),
-    ("Kovac_Chamfer", "Chamfer", "Bevel edges", chamfer, "chamfer"),
-    ("Kovac_Shell", "Shell", "Hollow a body, optionally opening faces", shell_, "shell"),
-    ("Kovac_Draft", "Draft", "Tilt faces for moulding", draft, "draft"),
-    ("Kovac_DeleteFace", "Delete Face", "Remove faces and heal the gap", delete_face, "deleteface"),
-    ("Kovac_Combine", "Combine", "Join, cut or intersect bodies", combine, "combine"),
-    ("Kovac_Split", "Split Body", "Cut a body in two with a plane or face", split, "split"),
-    ("Kovac_Move", "Move / Copy", "Move or copy bodies (recorded in the history)", move, "move"),
-    ("Kovac_Scale", "Scale", "Scale bodies", scale, "scale"),
-    ("Kovac_Mirror", "Mirror", "Mirror bodies", mirror, "mirror"),
-    ("Kovac_PatternRect", "Rectangular Pattern", "Repeat features or bodies in rows", pattern("Rectangular"), "pattern"),
-    ("Kovac_PatternCirc", "Circular Pattern", "Repeat features or bodies around an axis", pattern("Circular"), "patterncirc"),
-    ("Kovac_Plane", "Plane", "Construction plane", plane, "plane"),
-    ("Kovac_Axis", "Axis", "Construction axis", axis, "axis"),
-    ("Kovac_Point", "Point", "Construction point", point, "point"),
+     face_pull, "facepull", ""),
+    ("Kovac_Fillet", "Fillet", "Round edges", fillet, "fillet", "F"),
+    ("Kovac_Chamfer", "Chamfer", "Bevel edges", chamfer, "chamfer", "M"),
+    ("Kovac_Shell", "Shell", "Hollow a body, optionally opening faces", shell_, "shell", "J"),
+    ("Kovac_Draft", "Draft", "Tilt faces for moulding", draft, "draft", ""),
+    ("Kovac_DeleteFace", "Delete Face", "Remove faces and heal the gap", delete_face, "deleteface", ""),
+    ("Kovac_Combine", "Combine", "Join, cut or intersect bodies", combine, "combine", ""),
+    ("Kovac_Split", "Split Body", "Cut a body in two with a plane or face", split, "split", ""),
+    ("Kovac_Move", "Move / Copy", "Move or copy bodies (recorded in the history)", move, "move", ""),
+    ("Kovac_Scale", "Scale", "Scale bodies", scale, "scale", ""),
+    ("Kovac_Mirror", "Mirror", "Mirror bodies", mirror, "mirror", ""),
+    ("Kovac_PatternRect", "Rectangular Pattern", "Repeat features or bodies in rows", pattern("Rectangular"), "pattern", ""),
+    ("Kovac_PatternCirc", "Circular Pattern", "Repeat features or bodies around an axis", pattern("Circular"), "patterncirc", ""),
+    ("Kovac_Plane", "Plane", "Construction plane", plane, "plane", ""),
+    ("Kovac_Axis", "Axis", "Construction axis", axis, "axis", ""),
+    ("Kovac_Point", "Point", "Construction point", point, "point", ""),
 ]
 
 
 def register():
-    for cid, label, tip, fn, icon in COMMANDS:
-        commands.add(cid, label, tip, fn, icon=kovac.icon(icon))
+    for cid, label, tip, fn, icon, key in COMMANDS:
+        commands.add(cid, label, tip, fn, icon=kovac.icon(icon), key=key)

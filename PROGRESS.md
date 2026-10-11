@@ -89,5 +89,14 @@ Recorded in `CLAUDE.md` → "UI direction".
 | Ground grid follows the view (effectively infinite); no flicker at z = 0 | done |
 | Plane picker: outlined rounded squares on the camera side, hover light-up, click flash | done |
 
+## Bug-fix pass (2026-10-11)
+
+A batch of fixes and small features from the owner's own testing, worked item by item.
+
+| Item | State |
+|---|---|
+| Ground grid vanishing at some camera angles: Coin's own near/far auto-clipping starved by the same bounding-box exclusion that keeps "fit all" from zooming out for the grid | fixed; GUI regression test sweeps several tilts |
+| Hovering a command shows its shortcut; shortcuts added for the commands used most (sketch, the five Create ops, Fillet/Chamfer/Shell, Finish Sketch, Grid) | done; dropdown-nested and structurally-generated commands (primitives, patterns, reference geometry, the 26 views, the 9 filters) left without one, same reasoning as the existing shortcut-free commands |
+
 ## Next
 Milestone 3 — drawings, in the same look and logic.

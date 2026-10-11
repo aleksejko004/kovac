@@ -370,6 +370,28 @@ def scenario():
     w.close()
     check("command search key is S", Gui.Command.get("Kovac_Search").getInfo()["shortcut"] == "S")
 
+    # -- shortcuts: assigned where reasonable, and shown on hover (regression) ------------
+    want_keys = {"Kovac_Sketch": "F2", "Kovac_Extrude": "X", "Kovac_Revolve": "R", "Kovac_Sweep": "U",
+                 "Kovac_Loft": "O", "Kovac_Hole": "B", "Kovac_Thread": "Y", "Kovac_Fillet": "F",
+                 "Kovac_Chamfer": "M", "Kovac_Shell": "J", "Kovac_FinishSketch": "Return", "Kovac_Grid": "F3"}
+    missing = {cid: Gui.Command.get(cid).getInfo().get("shortcut") for cid in want_keys
+               if Gui.Command.get(cid).getInfo().get("shortcut") != want_keys[cid]}
+    check("the commands shown most often in the ribbon carry a shortcut", not missing, missing)
+    act = Gui.Command.get("Kovac_Fillet").getAction()[0]
+    check("hovering a command with a shortcut shows it in the tooltip", "(F)" in act.toolTip(), act.toolTip())
+    # no two Kovač commands claim the same key, and none is a prefix of another (e.g. a bare
+    # "G" shortcut would be ambiguous against a "G, R"-style sequence elsewhere)
+    kovac_keys = {cid: Gui.Command.get(cid).getInfo().get("shortcut", "") for cid in Gui.listCommands()
+                  if cid.startswith("Kovac_")}
+    kovac_keys = {cid: sc for cid, sc in kovac_keys.items() if sc}
+    seqs = {cid: tuple(p.strip() for p in sc.split(",")) for cid, sc in kovac_keys.items()}
+    clashes = []
+    for cid1, s1 in seqs.items():
+        for cid2, s2 in seqs.items():
+            if cid1 < cid2 and (s1 == s2 or s1[:min(len(s1), len(s2))] == s2[:min(len(s1), len(s2))]):
+                clashes.append((cid1, kovac_keys[cid1], cid2, kovac_keys[cid2]))
+    check("no two Kovač shortcuts collide or prefix one another", not clashes, clashes)
+
     # -- regeneration + undo --------------------------------------------------------------
     box = doc.addObject("Part::Box", "Loose")   # outside our command layer, no recompute call
     box.Length = 7
