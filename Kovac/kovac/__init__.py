@@ -4,6 +4,7 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARAM = "User parameter:BaseApp/Preferences/Mod/Kovac"
+MATERIAL_MIME = "application/x-kovac-material"    # a material key, dragged from the library onto a body
 
 
 def prefs():

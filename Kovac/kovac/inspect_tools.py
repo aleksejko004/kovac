@@ -223,11 +223,30 @@ def apply_material(body, key):
         body.ViewObject.ShapeAppearance = [App.Material(DiffuseColor=overlay.rgb(materials.LIBRARY[key][3]))]
 
 
+class _MaterialList(QtWidgets.QListWidget):
+    """Drag a material out onto a body in the viewport, or the browser, to assign it there --
+    an alternative to select-bodies-then-double-click, not a replacement for it."""
+
+    def startDrag(self, _actions):
+        it = self.currentItem()
+        if it is None:
+            return
+        mime = QtCore.QMimeData()
+        mime.setData(kovac.MATERIAL_MIME, it.data(QtCore.Qt.UserRole).encode("utf-8"))
+        drag = QtGui.QDrag(self)
+        drag.setMimeData(mime)
+        pm = it.icon().pixmap(18, 18)
+        if not pm.isNull():
+            drag.setPixmap(pm)
+        drag.exec(QtCore.Qt.CopyAction)
+
+
 def material_panel():
     def body():
         w = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(w)
-        lst = QtWidgets.QListWidget()
+        lst = _MaterialList()
+        lst.setDragEnabled(True)
         for key, (name, rho, e, col) in materials.LIBRARY.items():
             pm = QtGui.QPixmap(14, 14)
             pm.fill(QtGui.QColor(col))
@@ -254,7 +273,8 @@ def material_panel():
                     if b.ViewObject is not None:
                         b.ViewObject.ShapeAppearance = [App.Material(DiffuseColor=(c.redF(), c.greenF(), c.blueF()))]
         color.clicked.connect(pick_color)
-        lay.addWidget(QtWidgets.QLabel("Select bodies, then double-click a material.", objectName="kovacMuted"))
+        lay.addWidget(QtWidgets.QLabel("Select bodies then double-click a material, or drag one onto a body.",
+                                       objectName="kovacMuted"))
         lay.addWidget(lst)
         lay.addWidget(color)
         return w

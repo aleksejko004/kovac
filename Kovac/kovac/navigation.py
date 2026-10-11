@@ -146,6 +146,7 @@ class Interactor(QtCore.QObject):
         self.hold = QtCore.QTimer(self, singleShot=True, interval=HOLD_MS)
         self.hold.timeout.connect(self._hold_fired)
         self.marker = None
+        self.vp.setAcceptDrops(True)      # a material dragged from its panel onto a body
         self.vp.installEventFilter(self)
 
     # ------------------------------------------------------------ helpers
@@ -172,6 +173,24 @@ class Interactor(QtCore.QObject):
             el = (h.get("SubName") or h.get("Component") or "").split(".")[-1]
             return 0 if el.startswith("Vertex") else 1 if el.startswith("Edge") else 2
         return min(near, key=rank)
+
+    def drop_material(self, ev):
+        """A material dragged out of its panel and dropped on a body: assign it there."""
+        if not ev.mimeData().hasFormat(kovac.MATERIAL_MIME):
+            return False
+        info = self.info_at(ev.position().toPoint())
+        if info is None:
+            return False
+        doc = App.getDocument(info["Document"])
+        obj = doc.getObject(info["Object"])
+        if obj is None or type(getattr(obj, "Proxy", None)).__name__ != "BodyProxy":
+            return False
+        key = bytes(ev.mimeData().data(kovac.MATERIAL_MIME)).decode("utf-8")
+        from kovac import commands, inspect_tools
+        with commands.transaction("Material", doc):
+            inspect_tools.apply_material(obj, key)
+        ev.acceptProposedAction()
+        return True
 
     def in_cube(self, pos):
         """Inside the orientation cube's corner square (NaviCube parameters)."""
@@ -264,6 +283,13 @@ class Interactor(QtCore.QObject):
         if getattr(self, "replaying", False):
             return False
         try:
+            if t in (QtCore.QEvent.DragEnter, QtCore.QEvent.DragMove):
+                if ev.mimeData().hasFormat(kovac.MATERIAL_MIME):
+                    ev.acceptProposedAction()
+                    return True
+                return False
+            if t == QtCore.QEvent.Drop:
+                return self.drop_material(ev)
             if t in (QtCore.QEvent.MouseMove, QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonRelease) \
                     and self.snap_sketch(ev):
                 return True

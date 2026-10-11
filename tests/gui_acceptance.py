@@ -443,14 +443,14 @@ def scenario():
         sk2.addGeometry(Part.LineSegment(pts[i], pts[(i + 1) % 4]))
     doc.recompute()
     before_new = set(doc.Objects)
-    ed_new = editor.start(features.Extrude, Profile=sk2, Length=0)     # zero distance: fails outright
+    ed_new = editor.start(features.Extrude, Profile=sk2, Length=0, Operation="New body")  # zero distance: fails outright
     yield 150
     status_new = ed_new.fp.Status
     ok_button().click()
     yield 200
     check("a brand-new feature that fails outright is discarded on OK, not left broken",
           bool(status_new) and set(doc.Objects) == before_new | {sk2}, (status_new, [o.Name for o in doc.Objects]))
-    ed_good = editor.start(features.Extrude, Profile=sk2, Length=5)
+    ed_good = editor.start(features.Extrude, Profile=sk2, Length=5, Operation="New body")  # its own body: never touches the imported one
     yield 150
     ok_button().click()
     yield 200
@@ -465,10 +465,35 @@ def scenario():
     check("a feature broken by editing it stays in the history, with its status set",
           bool(status_edit) and doc.getObject(ex2.Name) is not None and doc.getObject(ex2.Name).Status == status_edit,
           (status_edit, doc.getObject(ex2.Name)))
-    doc.removeObject(ex2.Name)
+    model.remove(doc, ex2)        # proper history removal (relink/sync_bodies), not a raw removeObject
     doc.removeObject(sk2.Name)
     doc.recompute()
     yield 200
+
+    # -- dragging a material out of its panel onto a body assigns it -----------------------
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 300
+    commands.run("Kovac_Material")
+    yield 200
+    mat_panel = mw.findChild(QtWidgets.QDockWidget, "kovacMaterial")
+    mat_list = mat_panel.widget().findChild(QtWidgets.QListWidget) if mat_panel else None
+    key = mat_list.item(0).data(QtCore.Qt.UserRole) if mat_list else None
+    if mat_panel:
+        mat_panel.close()           # the floating panel can sit over the viewport and block picking there
+    yield 500
+    view().fitAll()
+    yield 300
+    drop_i, drop_c = face_point(body.Shape, V(0, 0, 1))      # recomputed fresh, not reused from way earlier
+    before_material = body.Material
+    mime = QtCore.QMimeData()
+    mime.setData("application/x-kovac-material", key.encode("utf-8") if key else b"")
+    drop_pos = to_qt(V(drop_c.x - 15, drop_c.y, drop_c.z))
+    drop_ev = QtGui.QDropEvent(QtCore.QPointF(drop_pos), QtCore.Qt.CopyAction, mime, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier)
+    handled = it.drop_material(drop_ev) if key else False
+    yield 100
+    check("dragging a material from its panel onto a body assigns it",
+          key is not None and handled and body.Material == key and before_material != key,
+          (key, handled, before_material, body.Material))
 
     # -- modes keep the model ------------------------------------------------------------
     commands.run("Kovac_Mode_Make")
