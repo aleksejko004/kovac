@@ -60,6 +60,10 @@ KOVAC_KEYS = ("S",)     # sketcher shortcuts that would shadow Kovač's own keys
 _ui = {}
 
 
+def _is_datum_plane(obj):
+    return type(getattr(obj, "Proxy", None)).__name__ == "DatumPlane" and not getattr(obj, "Auto", False)
+
+
 def _face_plane(obj, sub):
     if not sub or not sub.split(".")[-1].startswith("Face"):
         return None
@@ -91,7 +95,7 @@ def start(then=None):
         doc = App.ActiveDocument
     for s in Gui.Selection.getSelectionEx("", 0):
         for sub in s.SubElementNames or [""]:
-            if type(getattr(s.Object, "Proxy", None)).__name__ == "DatumPlane" and not sub:
+            if _is_datum_plane(s.Object):         # picked in the view it comes with "Face1"
                 return create(base=s.Object.Name, then=then)
             if _face_plane(s.Object, sub) is not None and model.pick_ref(s.Object, sub):
                 return create(base=model.pick_ref(s.Object, sub), then=then)
@@ -195,6 +199,10 @@ class PlanePicker:
         info = it.info_at(pos)
         if info:
             obj, sub = it.target(info)
+            if _is_datum_plane(obj):
+                self.cancel()
+                create(base=obj.Name, then=self.then)
+                return True
             if _face_plane(obj, sub) is not None and model.pick_ref(obj, sub):
                 ref = model.pick_ref(obj, sub)
                 self.cancel()

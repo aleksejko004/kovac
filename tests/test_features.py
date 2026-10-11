@@ -192,6 +192,23 @@ class Features(unittest.TestCase):
         self.assertIn(V(5, 0, 0), grid.face_points(face))                    # a straight edge's own midpoint
 
     # ---- modify
+    def test_fillet_arrow_points_into_an_outside_edge_and_out_of_an_inside_one(self):
+        from kovac import manip
+        pts = [(0, 0), (40, 0), (40, 10), (10, 10), (10, 30), (0, 30)]
+        sk = sketch(self.doc, [("line", pts[i], pts[(i + 1) % 6]) for i in range(6)])
+        feature(self.doc, features.Extrude, Profile=sk, Length=10)
+        self.body = live_bodies(self.doc)[0]
+        inside = self.ok(feature(self.doc, modify.Fillet, Edges=[edge_ref(self.doc, self.body, vertical_edge_at(10, 10))], Radius=2))
+        o, n = manip._edge_group_axis(inside)
+        self.assertGreater(n.x, 0.6)          # out into the empty inside corner, where the fillet adds material
+        self.assertGreater(n.y, 0.6)
+        inside.Suppressed = True
+        model.commit(self.doc)
+        outside = self.ok(feature(self.doc, modify.Fillet, Edges=[edge_ref(self.doc, self.body, vertical_edge_at(40, 0))], Radius=2))
+        o, n = manip._edge_group_axis(outside)
+        self.assertLess(n.x, -0.6)            # into the material at the outside corner, where it is cut away
+        self.assertGreater(n.y, 0.6)
+
     def test_fillet_and_chamfer(self):
         self.plate()
         e = edge_ref(self.doc, self.body, vertical_edge_at(40, 20))
@@ -287,6 +304,19 @@ class Features(unittest.TestCase):
         self.assertAlmostEqual(live_bodies(self.doc)[0].Shape.Volume, 8 * 6000, 4)
         self.ok(feature(self.doc, modify.Mirror, Bodies=[ids[1]], Plane="YZ", Join=False))
         self.assertEqual(len(live_bodies(self.doc)), 4)
+
+    def test_split_and_sketch_on_a_three_point_plane(self):
+        self.plate()
+        def corner(x, y, z):
+            k = next(i for i, v in enumerate(self.body.Shape.Vertexes, 1) if (v.Point - V(x, y, z)).Length < 1e-6)
+            return model.pick_ref(self.body, "Vertex%d" % k)
+        d = self.ok(feature(self.doc, datum.DatumPlane, Mode="ThreePoints",
+                            Refs=[corner(0, 0, 0), corner(40, 20, 0), corner(0, 0, 10)]))
+        self.ok(feature(self.doc, modify.SplitBody, Body=self.body.BodyId, Plane=d.Name))
+        vols = sorted(round(b.Shape.Volume) for b in live_bodies(self.doc))
+        self.assertEqual(vols, [4000, 4000])                  # the plate's diagonal, top to bottom
+        sk_plane = self.ok(feature(self.doc, datum.DatumPlane, Mode="Offset", Base=d.Name, Auto=True))
+        self.assertAlmostEqual(abs(sk_plane.Placement.Rotation.multVec(V(0, 0, 1)).dot(V(1, -2, 0).normalize())), 1, 6)
 
     def test_split_by_a_curved_face(self):
         """A cylindrical or spherical face splits by the whole analytic surface, not just the

@@ -351,7 +351,8 @@ class PlaneRow(_Row):
             type(getattr(obj, "Proxy", None)).__name__ == "DatumPlane"
 
     def take(self, obj, sub, pnt):
-        setattr(self.ed.fp, self.prop, obj.Name if not sub else model.pick_ref(obj, sub))
+        datum = type(getattr(obj, "Proxy", None)).__name__ == "DatumPlane"   # clicked in the view it comes as "Face1"
+        setattr(self.ed.fp, self.prop, obj.Name if datum or not sub else model.pick_ref(obj, sub))
         self.combo.blockSignals(True)
         self.combo.setCurrentIndex(3)
         self.combo.blockSignals(False)
