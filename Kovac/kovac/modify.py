@@ -417,23 +417,49 @@ def _halfspace(o, n, size):
     return b
 
 
+def _split_tool(fp, prop, state, body_shape):
+    """The solid to split body_shape with: a half-space for 'XY'/'XZ'/'YZ', a datum plane or a
+    flat face (as plane_of, which a curved face fails); the whole analytic surface's own solid
+    -- not just the picked patch -- for a cylindrical or spherical face, sized to reach past
+    body_shape everywhere. A full cylinder or sphere already bounds a solid the same way a
+    plane already bounds a half-space; there is no equivalent closed form for a cone or a
+    freeform face, so those still need a flat face or a plane."""
+    bb = body_shape.BoundBox
+    size = bb.DiagonalLength * 4
+    v = getattr(fp, prop)
+    if v in ("XY", "XZ", "YZ") or (fp.Document.getObject(v) if v and not v.startswith("{") else None) is not None:
+        o, n = plane_of(fp, prop, state)
+        return _halfspace(o, n, size + (o - bb.Center).Length)
+    _, face = topo.element(state, v)
+    surf = face.Surface
+    if isinstance(surf, Part.Plane):
+        o, n = surf.Position, face.normalAt(*surf.parameter(face.CenterOfMass))
+        return _halfspace(o, n, size + (o - bb.Center).Length)
+    if isinstance(surf, Part.Cylinder):
+        axis = surf.Axis.normalize()
+        return Part.makeCylinder(surf.Radius, size, surf.Center - axis * (size / 2), axis)
+    if isinstance(surf, Part.Sphere):
+        return Part.makeSphere(surf.Radius, surf.Center)
+    raise ValueError("Pick a plane, a flat face, or a cylindrical or spherical face.")
+
+
 class SplitBody(model.Feature):
     kind, icon = "SplitBody", "split"
 
     def setup(self, fp):
         fp.addProperty("App::PropertyString", "Body", "Split", "body id")
-        fp.addProperty("App::PropertyString", "Plane", "Split", "XY/XZ/YZ, a plane, or a flat face")
+        fp.addProperty("App::PropertyString", "Plane", "Split",
+                       "XY/XZ/YZ, a plane, a flat face, or a cylindrical/spherical face")
 
     def apply(self, fp, state):
         if fp.Body not in state:
             raise topo.Broken("the body to split no longer exists")
         src = state[fp.Body]
-        o, n = plane_of(fp, "Plane", state)
-        size = src.shape.BoundBox.DiagonalLength * 4 + (o - src.shape.BoundBox.Center).Length
-        cut = topo.Body(_halfspace(o, n, size), ["%s:split" % fp.Name] * 6)
+        tool = _split_tool(fp, "Plane", state, src.shape)
+        cut = topo.Body(tool, ["%s:split" % fp.Name] * len(tool.Faces))
         pos, neg = src.shape.common(cut.shape), src.shape.cut(cut.shape)
         if not pos.Solids or not neg.Solids:
-            raise ValueError("The plane does not cross the body.")
+            raise ValueError("The split tool does not cross the body.")
         state[fp.Body] = topo.Body(pos, topo.inherit(pos, [src, cut]))
         state[model.new_body_id(fp)] = topo.Body(neg, topo.inherit(neg, [src, cut]))
         return state

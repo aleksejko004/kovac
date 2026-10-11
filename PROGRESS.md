@@ -107,6 +107,7 @@ A batch of fixes and small features from the owner's own testing, worked item by
 | Sketch Offset ("in sketch mode, offset does not work") | investigated at length (single edge, closed 4-edge profile, both through a real simulated click reaching FreeCAD's own tool, not a shortcut) -- works correctly both times; could not reproduce a defect |
 | A brand-new feature that failed outright (OK clicked on something already broken) stayed in the history forever, same as one broken later by an upstream change | fixed: OK on a *new*, already-failed feature now discards it, same as Cancel; editing an *existing* feature into failure still keeps it, Status set, shown red -- that part already worked |
 | Materials: drag and drop a material from its panel onto a body | added, as well as (not instead of) the existing select-bodies-then-double-click; works in the viewport |
+| Split Body only ever worked with a flat plane or face; a cylindrical or spherical face did nothing (silently fell through to "pick a flat face") | fixed: a cylindrical or spherical face now splits by the whole analytic surface, not just the clicked patch, the same way a plane already bounds a half-space; a cone or freeform face still needs a flat face or a plane -- no closed-form equivalent for those -- and says so clearly rather than failing silently |
 
 ## Next
 Milestone 3 — drawings, in the same look and logic.

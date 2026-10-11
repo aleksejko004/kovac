@@ -271,7 +271,7 @@ class Features(unittest.TestCase):
         self.vol(8000 - 10 * 10 * 10, a)
         self.assertEqual(len(live_bodies(self.doc)), 1)
         miss = feature(self.doc, modify.SplitBody, Body=a.BodyId, Plane="YZ")   # x = 0 doesn't cross it
-        self.assertEqual(miss.Status, "The plane does not cross the body.")
+        self.assertEqual(miss.Status, "The split tool does not cross the body.")
         self.vol(7000, a)                                                       # state passed through
 
     def test_split_move_scale_mirror(self):
@@ -287,6 +287,30 @@ class Features(unittest.TestCase):
         self.assertAlmostEqual(live_bodies(self.doc)[0].Shape.Volume, 8 * 6000, 4)
         self.ok(feature(self.doc, modify.Mirror, Bodies=[ids[1]], Plane="YZ", Join=False))
         self.assertEqual(len(live_bodies(self.doc)), 4)
+
+    def test_split_by_a_curved_face(self):
+        """A cylindrical or spherical face splits by the whole analytic surface, not just the
+        clicked patch; a cone or freeform face still needs a flat face or a plane -- a clear
+        error, not a crash."""
+        self.plate()                                  # 40 x 20 x 10, x:[0,40] y:[0,20] z:[0,10]
+        cyl = feature(self.doc, features.Primitive, PrimitiveType="Cylinder", Radius=5, Height=30,
+                      Location=App.Placement(V(20, 10, -10), App.Rotation()), Operation="New body")
+        cyl_body = next(b for b in live_bodies(self.doc) if b.BodyId != self.body.BodyId)
+        ref = face_ref(self.doc, cyl_body, lambda f: isinstance(f.Surface, Part.Cylinder))
+        self.ok(feature(self.doc, modify.SplitBody, Body=self.body.BodyId, Plane=ref))
+        main_vols = sorted(b.Shape.Volume for b in live_bodies(self.doc) if b.BodyId != cyl_body.BodyId)
+        self.assertEqual(len(main_vols), 2)
+        inner = PI * 5 ** 2 * 10
+        self.assertAlmostEqual(main_vols[0], inner, 1)
+        self.assertAlmostEqual(main_vols[1], 8000 - inner, 1)
+
+        before_ids = {b.BodyId for b in live_bodies(self.doc)}
+        feature(self.doc, features.Primitive, PrimitiveType="Cone", Radius=8, Radius2=2, Height=20,
+                Location=App.Placement(V(20, 10, -5), App.Rotation()), Operation="New body")
+        cone_body = next(b for b in live_bodies(self.doc) if b.BodyId not in before_ids)
+        cone_ref = face_ref(self.doc, cone_body, lambda f: isinstance(f.Surface, Part.Cone))
+        bad = feature(self.doc, modify.SplitBody, Body=self.body.BodyId, Plane=cone_ref)
+        self.assertIn("flat face, or a cylindrical or spherical face", bad.Status)
 
     def test_patterns(self):
         self.plate()
