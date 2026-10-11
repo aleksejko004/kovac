@@ -537,6 +537,43 @@ class Mirror(model.Feature):
 
 # ---------------------------------------------------------------- Pattern
 
+def _path_points(wire, count):
+    """count points at count-1 equal arc-length steps along wire: [(point, tangent direction)]."""
+    edges = wire.Edges
+    lens = [e.Length for e in edges]
+    total = sum(lens)
+    if total < 1e-9:
+        raise ValueError("The path has no length.")
+    out = []
+    for i in range(count):
+        s = total * i / max(count - 1, 1) if count > 1 else 0.0
+        acc = 0.0
+        for e, length in zip(edges, lens):
+            if s <= acc + length + 1e-9 or e is edges[-1]:
+                local = min(max(s - acc, 0.0), length)
+                p0 = e.FirstParameter
+                param = e.Curve.parameterAtDistance(local, p0) if hasattr(e.Curve, "parameterAtDistance") \
+                    else p0 + (e.LastParameter - p0) * (local / length if length > 1e-9 else 0)
+                out.append((e.valueAt(param), e.tangentAt(param)))
+                break
+            acc += length
+    return out
+
+
+def _path_placements(wire, count, align):
+    """Placements relative to the path's own start: identical at count=1 (no instance moves),
+    so the source feature, wherever it already sits, is just carried along by the same amount
+    every other instance is -- the same 'nothing changes at index 0' convention Rectangular and
+    Circular already use."""
+    pts = _path_points(wire, count)
+
+    def frame(p, t):
+        rot = App.Rotation(V(1, 0, 0), t) if align and t.Length > 1e-9 else App.Rotation()
+        return App.Placement(p, rot)
+    base = frame(*pts[0]).inverse()
+    return [frame(p, t).multiply(base) for p, t in pts]
+
+
 class Pattern(model.Feature):
     """Repeat features (their tool shape, same operation) or bodies (as new bodies)."""
     kind, icon = "Pattern", "pattern"
@@ -545,7 +582,7 @@ class Pattern(model.Feature):
         fp.addProperty("App::PropertyLinkList", "Sources", "Pattern", "features to repeat")
         fp.addProperty("App::PropertyStringList", "Bodies", "Pattern", "or: body ids to repeat")
         fp.addProperty("App::PropertyEnumeration", "Type", "Pattern", "")
-        fp.Type = ["Rectangular", "Circular"]
+        fp.Type = ["Rectangular", "Circular", "Path"]
         fp.addProperty("App::PropertyVector", "Direction1", "Rectangular", "").Direction1 = V(1, 0, 0)
         fp.addProperty("App::PropertyIntegerConstraint", "Count1", "Rectangular", "").Count1 = (2, 1, 10000, 1)
         fp.addProperty("App::PropertyDistance", "Spacing1", "Rectangular", "").Spacing1 = 10
@@ -556,6 +593,9 @@ class Pattern(model.Feature):
         fp.addProperty("App::PropertyVector", "AxisPoint", "Circular", "a point on the axis (X/Y/Z)")
         fp.addProperty("App::PropertyIntegerConstraint", "Count", "Circular", "").Count = (4, 1, 10000, 1)
         fp.addProperty("App::PropertyAngle", "TotalAngle", "Circular", "").TotalAngle = 360
+        fp.addProperty("App::PropertyLink", "Path", "Path", "sketch holding the path")
+        fp.addProperty("App::PropertyStringList", "PathEdges", "Path", "or: edges used as the path")
+        fp.addProperty("App::PropertyBool", "Align", "Path", "rotate instances to follow the path").Align = True
         fp.addProperty("App::PropertyIntegerList", "Skip", "Pattern", "instance numbers to leave out")
 
     def placements(self, fp, state):
@@ -567,7 +607,7 @@ class Pattern(model.Feature):
             for j in range(fp.Count2):
                 for i in range(fp.Count1):
                     out.append(App.Placement(d1 * (i * fp.Spacing1.Value) + d2 * (j * fp.Spacing2.Value), App.Rotation()))
-        else:
+        elif fp.Type == "Circular":
             if fp.Axis in ("X", "Y", "Z"):
                 base, axis = V(fp.AxisPoint), V(*[1 if c == fp.Axis else 0 for c in "XYZ"])
             else:
@@ -579,7 +619,17 @@ class Pattern(model.Feature):
             for i in range(n):
                 rot = App.Rotation(axis, step * i)
                 out.append(App.Placement(base - rot.multVec(base), rot))
+        else:
+            out = _path_placements(self._path_wire(fp, state), fp.Count, fp.Align)
         return out
+
+    def _path_wire(self, fp, state):
+        if fp.Path is not None:
+            from kovac import features
+            return features.sketch_wire(fp.Path)
+        if fp.PathEdges:
+            return Part.Wire(Part.__sortEdges__([topo.element(state, r)[1] for r in model.refs(fp, "PathEdges")]))
+        raise ValueError("Pick a path to pattern along.")
 
     def apply(self, fp, state):
         pls = self.placements(fp, state)

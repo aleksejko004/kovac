@@ -77,6 +77,8 @@ SCHEMAS = {
                 ("vector", "Direction1", "Direction 1"), ("int", "Count1", "Count 1"), ("value", "Spacing1", "Spacing 1"),
                 ("vector", "Direction2", "Direction 2"), ("int", "Count2", "Count 2"), ("value", "Spacing2", "Spacing 2"),
                 ("axis", "Axis", "Axis"), ("int", "Count", "Count"), ("value", "TotalAngle", "Total angle"),
+                ("sketch", "Path", "Path"), ("picks", "PathEdges", "or path edges", ("Edge",)),
+                ("bool", "Align", "Follow the path"),
                 ("skip", "Skip", "Skipped (click instances)")],
     "RemoveBody": [("bodies", "Bodies", "Bodies")],
     "Thread": [("picks", "Faces", "Cylindrical faces", ("Face",)), ("text", "Size", "Size"), ("value", "Length", "Length")],

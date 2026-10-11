@@ -312,6 +312,33 @@ class Features(unittest.TestCase):
         bad = feature(self.doc, modify.SplitBody, Body=self.body.BodyId, Plane=cone_ref)
         self.assertIn("flat face, or a cylindrical or spherical face", bad.Status)
 
+    def test_pattern_along_a_path(self):
+        """Pattern Type='Path': evenly spaced along a sketch curve or picked 3D edges (not just
+        a flat sketch), instances rotated to follow the tangent when Align is set."""
+        self.plate()                                  # 40 x 20 x 10
+        hole_vol = PI * 2.75 ** 2 * 10                 # a through M5 in a 10 mm plate (see test_patterns)
+        h = feature(self.doc, features.Hole, Face=self.top(), Positions=[V(5, 10, 10)], Size="M5", ThroughAll=True)
+        path = sketch(self.doc, [("line", (5, 10), (35, 10))], name="HolePath")   # starts at the hole itself
+        self.ok(feature(self.doc, modify.Pattern, Sources=[h], Type="Path", Path=path, Count=4))
+        self.vol(8000 - 4 * hole_vol)                  # 4 evenly spaced holes, 10 mm apart: x = 5, 15, 25, 35
+        state = model.state_of(model.tip(self.doc))
+        centers = sorted(round(f.CenterOfMass.x, 3) for b in state.values() for f in b.shape.Faces
+                         if isinstance(f.Surface, Part.Cylinder) and abs(f.Surface.Radius - 2.75) < 1e-3)
+        self.assertEqual(centers, [5.0, 15.0, 25.0, 35.0])
+
+        # a 3D path from picked edges, not a sketch: a small reference body's own vertical edge
+        before_ids = {b.BodyId for b in live_bodies(self.doc)}
+        feature(self.doc, features.Primitive, PrimitiveType="Box", Length=2, Width=2, Height=12,
+                Location=App.Placement(V(60, 0, 0), App.Rotation()), Operation="New body")
+        ref_body = next(b for b in live_bodies(self.doc) if b.BodyId not in before_ids)
+        ref = edge_ref(self.doc, ref_body, vertical_edge_at(60, 0))
+        before2 = len(live_bodies(self.doc))
+        self.ok(feature(self.doc, modify.Pattern, Bodies=[ref_body.BodyId], Type="Path", PathEdges=[ref], Count=3))
+        self.assertEqual(len(live_bodies(self.doc)), before2 + 2)      # the original + 2 new copies
+        new_boxes = [b for b in live_bodies(self.doc) if b.BodyId != ref_body.BodyId and b.BodyId not in before_ids]
+        z = sorted(round(b.Shape.BoundBox.Center.z, 3) for b in new_boxes)
+        self.assertEqual(z, [12.0, 18.0])          # original centre z=6, offset by the edge's own 0/6/12 steps
+
     def test_patterns(self):
         self.plate()
         h = feature(self.doc, features.Hole, Face=self.top(), Positions=[V(5, 10, 10)], Size="M5", ThroughAll=True)
