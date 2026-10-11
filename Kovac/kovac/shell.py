@@ -590,6 +590,11 @@ def initialize(wb):
     wb.appendMenu(["&Kovač", "Views"], [c for c in commands.REGISTRY if c.startswith("Kovac_View_")])
     wb.appendMenu(["&Kovač", "Selection filter"], [c for c in commands.REGISTRY if c.startswith("Kovac_Filter_")])
     wb.appendMenu(["&Kovač", "Mode"], [c for c in commands.REGISTRY if c.startswith("Kovac_Mode_")])
+    # Same for the sketcher's tools: sketches stay in Kovač (no switch to FreeCAD's sketcher
+    # workbench), so without this their default keys ("G, L", ...) were never registered at all.
+    import SketcherGui  # noqa: F401  (registers the sketcher commands)
+    from kovac import sketchmode
+    wb.appendMenu(["&Kovač", "Sketch"], [c for c in sketchmode.tool_ids() if not c.startswith("Kovac_")])
 
 
 def activated():

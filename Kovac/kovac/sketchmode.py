@@ -287,6 +287,10 @@ def in_sketch():
     return obj is not None and obj.Object.TypeId.startswith("Sketcher::")
 
 
+def tool_ids():
+    return [cid for _, tools in SKETCH_TOOLS for e in tools for cid, _ in (e if isinstance(e, list) else [e])]
+
+
 def _tool_action(cid, icon, parent):
     """Our own button for a sketcher command (FreeCAD makes its actions only for its own bars)."""
     cmd = Gui.Command.get(cid)
@@ -296,9 +300,13 @@ def _tool_action(cid, icon, parent):
     text = info.get("menuText", cid).replace("&", "")
     a = QtGui.QAction(QtGui.QIcon(kovac.icon(icon)), text, parent)
     a.setObjectName(cid)
-    key = info.get("shortcut", "")
+    key = cmd.getShortcut() or info.get("shortcut", "")
+    for own in cmd.getAction():           # the key moves to our button; two actions on one key fire neither
+        own.setShortcut(QtGui.QKeySequence())
+    if key in KOVAC_KEYS:
+        key = ""
     a.setToolTip("%s%s\n%s" % (text, "  (%s)" % key if key else "", info.get("toolTip", "")))
-    if key and key not in KOVAC_KEYS:
+    if key:
         a.setShortcut(QtGui.QKeySequence(key))
     a.triggered.connect(lambda _=False, c=cid: (sketchtools.stop(), commands.run(c)))   # recorded for "repeat last"
     return a
