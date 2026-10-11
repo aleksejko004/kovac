@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+<polyline points="4.50,4.50 4.50,13.50" fill="none" stroke="#2A3038" stroke-width="1.50" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="10.50,19.50 19.50,19.50" fill="none" stroke="#2A3038" stroke-width="1.50" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="4.50,13.50 4.57,14.44 4.79,15.35 5.15,16.22 5.65,17.03 6.26,17.74 6.97,18.35 7.78,18.85 8.65,19.21 9.56,19.43 10.50,19.50" fill="none" stroke="#14857D" stroke-width="2.20" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="4.50,13.50 4.50,19.50" fill="none" stroke="#5B636E" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1.5,1.5"/>
+<polyline points="4.50,19.50 10.50,19.50" fill="none" stroke="#5B636E" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1.5,1.5"/>
+</svg>

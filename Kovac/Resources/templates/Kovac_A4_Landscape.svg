@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:freecad="http://www.freecad.org/wiki/index.php?title=Svg_Namespace" width="297mm" height="210mm" viewBox="0 0 297 210">
+<rect x="0" y="0" width="297" height="210" fill="#FFFFFF"/>
+<rect x="20.00" y="10.00" width="267.00" height="190.00" fill="none" stroke="#000000" stroke-width="0.7"/>
+<line x1="148.50" y1="0.00" x2="148.50" y2="15.00" stroke="#000000" stroke-width="0.70"/>
+<line x1="148.50" y1="210.00" x2="148.50" y2="195.00" stroke="#000000" stroke-width="0.70"/>
+<line x1="0.00" y1="105.00" x2="25.00" y2="105.00" stroke="#000000" stroke-width="0.70"/>
+<line x1="297.00" y1="105.00" x2="282.00" y2="105.00" stroke="#000000" stroke-width="0.70"/>
+<text x="42.25" y="8.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="42.25" y="8.40">1</tspan></text>
+<text x="42.25" y="203.80" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="42.25" y="203.80">1</tspan></text>
+<line x1="64.50" y1="5.00" x2="64.50" y2="10.00" stroke="#000000" stroke-width="0.25"/>
+<line x1="64.50" y1="200.00" x2="64.50" y2="205.00" stroke="#000000" stroke-width="0.25"/>
+<text x="86.75" y="8.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="86.75" y="8.40">2</tspan></text>
+<text x="86.75" y="203.80" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="86.75" y="203.80">2</tspan></text>
+<line x1="109.00" y1="5.00" x2="109.00" y2="10.00" stroke="#000000" stroke-width="0.25"/>
+<line x1="109.00" y1="200.00" x2="109.00" y2="205.00" stroke="#000000" stroke-width="0.25"/>
+<text x="131.25" y="8.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="131.25" y="8.40">3</tspan></text>
+<text x="131.25" y="203.80" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="131.25" y="203.80">3</tspan></text>
+<line x1="153.50" y1="5.00" x2="153.50" y2="10.00" stroke="#000000" stroke-width="0.25"/>
+<line x1="153.50" y1="200.00" x2="153.50" y2="205.00" stroke="#000000" stroke-width="0.25"/>
+<text x="175.75" y="8.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="175.75" y="8.40">4</tspan></text>
+<text x="175.75" y="203.80" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="175.75" y="203.80">4</tspan></text>
+<line x1="198.00" y1="5.00" x2="198.00" y2="10.00" stroke="#000000" stroke-width="0.25"/>
+<line x1="198.00" y1="200.00" x2="198.00" y2="205.00" stroke="#000000" stroke-width="0.25"/>
+<text x="220.25" y="8.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="220.25" y="8.40">5</tspan></text>
+<text x="220.25" y="203.80" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="220.25" y="203.80">5</tspan></text>
+<line x1="242.50" y1="5.00" x2="242.50" y2="10.00" stroke="#000000" stroke-width="0.25"/>
+<line x1="242.50" y1="200.00" x2="242.50" y2="205.00" stroke="#000000" stroke-width="0.25"/>
+<text x="264.75" y="8.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="264.75" y="8.40">6</tspan></text>
+<text x="264.75" y="203.80" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="264.75" y="203.80">6</tspan></text>
+<text x="17.50" y="34.75" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="17.50" y="34.75">A</tspan></text>
+<text x="289.50" y="34.75" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="289.50" y="34.75">A</tspan></text>
+<line x1="15.00" y1="57.50" x2="20.00" y2="57.50" stroke="#000000" stroke-width="0.25"/>
+<line x1="287.00" y1="57.50" x2="292.00" y2="57.50" stroke="#000000" stroke-width="0.25"/>
+<text x="17.50" y="82.25" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="17.50" y="82.25">B</tspan></text>
+<text x="289.50" y="82.25" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="289.50" y="82.25">B</tspan></text>
+<line x1="15.00" y1="105.00" x2="20.00" y2="105.00" stroke="#000000" stroke-width="0.25"/>
+<line x1="287.00" y1="105.00" x2="292.00" y2="105.00" stroke="#000000" stroke-width="0.25"/>
+<text x="17.50" y="129.75" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="17.50" y="129.75">C</tspan></text>
+<text x="289.50" y="129.75" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="289.50" y="129.75">C</tspan></text>
+<line x1="15.00" y1="152.50" x2="20.00" y2="152.50" stroke="#000000" stroke-width="0.25"/>
+<line x1="287.00" y1="152.50" x2="292.00" y2="152.50" stroke="#000000" stroke-width="0.25"/>
+<text x="17.50" y="177.25" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="17.50" y="177.25">D</tspan></text>
+<text x="289.50" y="177.25" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.00" font-weight="400" fill="#5B636E" text-anchor="middle"><tspan x="289.50" y="177.25">D</tspan></text>
+<rect x="107.00" y="160.00" width="180.00" height="40.00" fill="none" stroke="#000000" stroke-width="0.7"/>
+<rect x="107.00" y="160.00" width="60.00" height="16.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="108.20" y="162.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="108.20" y="162.60">Legal owner</tspan></text>
+<text freecad:editable="Company" x="108.20" y="174.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="5.00" font-weight="600" fill="#000000" text-anchor="start"><tspan x="108.20" y="174.40"></tspan></text>
+<rect x="107.00" y="176.00" width="60.00" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="108.20" y="178.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="108.20" y="178.60">Material</tspan></text>
+<text freecad:editable="Material" x="108.20" y="182.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="108.20" y="182.40"></tspan></text>
+<rect x="107.00" y="184.00" width="30.00" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="108.20" y="186.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="108.20" y="186.60">Mass</tspan></text>
+<text freecad:editable="Mass" x="108.20" y="190.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="108.20" y="190.40"></tspan></text>
+<rect x="137.00" y="184.00" width="30.00" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="138.20" y="186.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="138.20" y="186.60">Surface</tspan></text>
+<text freecad:editable="Surface" x="138.20" y="190.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="138.20" y="190.40">Ra 3.2</tspan></text>
+<rect x="107.00" y="192.00" width="60.00" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="108.20" y="194.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="108.20" y="194.60">General tolerances</tspan></text>
+<text freecad:editable="GeneralTolerance" x="108.20" y="198.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="108.20" y="198.40">ISO 2768-mK</tspan></text>
+<rect x="167.00" y="160.00" width="75.00" height="16.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="168.20" y="162.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="168.20" y="162.60">Title</tspan></text>
+<text freecad:editable="Title" x="168.20" y="174.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="6.00" font-weight="600" fill="#000000" text-anchor="start"><tspan x="168.20" y="174.40"></tspan></text>
+<rect x="167.00" y="176.00" width="75.00" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="168.20" y="178.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="168.20" y="178.60">Supplementary title</tspan></text>
+<text freecad:editable="Subtitle" x="168.20" y="182.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="168.20" y="182.40"></tspan></text>
+<rect x="167.00" y="184.00" width="37.50" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="168.20" y="186.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="168.20" y="186.60">Created by</tspan></text>
+<text freecad:editable="CreatedBy" x="168.20" y="190.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="168.20" y="190.40"></tspan></text>
+<rect x="204.50" y="184.00" width="37.50" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="205.70" y="186.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="205.70" y="186.60">Approved by</tspan></text>
+<text freecad:editable="ApprovedBy" x="205.70" y="190.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="205.70" y="190.40"></tspan></text>
+<rect x="167.00" y="192.00" width="37.50" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="168.20" y="194.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="168.20" y="194.60">Date of issue</tspan></text>
+<text freecad:editable="Date" x="168.20" y="198.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="168.20" y="198.40"></tspan></text>
+<rect x="204.50" y="192.00" width="37.50" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="205.70" y="194.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="205.70" y="194.60">Scale</tspan></text>
+<text freecad:editable="Scale" x="205.70" y="198.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="205.70" y="198.40">1:1</tspan></text>
+<rect x="242.00" y="160.00" width="45.00" height="16.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="243.20" y="162.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="243.20" y="162.60">Identification number</tspan></text>
+<text freecad:editable="DrawingNumber" x="243.20" y="174.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="4.50" font-weight="600" fill="#000000" text-anchor="start"><tspan x="243.20" y="174.40"></tspan></text>
+<rect x="242.00" y="176.00" width="22.50" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="243.20" y="178.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="243.20" y="178.60">Revision</tspan></text>
+<text freecad:editable="Revision" x="243.20" y="182.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="243.20" y="182.40">A</tspan></text>
+<rect x="264.50" y="176.00" width="22.50" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="265.70" y="178.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="265.70" y="178.60">Sheet</tspan></text>
+<text freecad:editable="Sheet" x="265.70" y="182.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="3.20" font-weight="400" fill="#000000" text-anchor="start"><tspan x="265.70" y="182.40">1/1</tspan></text>
+<rect x="242.00" y="184.00" width="22.50" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="243.20" y="186.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="243.20" y="186.60">Document type</tspan></text>
+<text freecad:editable="DocumentType" x="243.20" y="190.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="2.60" font-weight="400" fill="#000000" text-anchor="start"><tspan x="243.20" y="190.40">Part drawing</tspan></text>
+<rect x="264.50" y="184.00" width="22.50" height="8.00" fill="none" stroke="#000000" stroke-width="0.25"/>
+<text x="265.70" y="186.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="1.80" font-weight="400" fill="#5B636E" text-anchor="start"><tspan x="265.70" y="186.60">Status</tspan></text>
+<text freecad:editable="Status" x="265.70" y="190.40" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="2.60" font-weight="400" fill="#000000" text-anchor="start"><tspan x="265.70" y="190.40">Released</tspan></text>
+<path d="M 244.00 194.50 L 251.00 193.00 L 251.00 199.00 L 244.00 197.50 Z" fill="none" stroke="#000000" stroke-width="0.35"/>
+<circle cx="256.00" cy="196.00" r="3.00" fill="none" stroke="#000000" stroke-width="0.35"/>
+<circle cx="256.00" cy="196.00" r="1.50" fill="none" stroke="#000000" stroke-width="0.35"/>
+<line x1="243.00" y1="196.00" x2="260.00" y2="196.00" stroke="#000000" stroke-width="0.18"/>
+<text x="285.80" y="198.60" font-family="Inter, Segoe UI, DejaVu Sans, sans-serif" font-size="2.20" font-weight="600" fill="#5B636E" text-anchor="end"><tspan x="285.80" y="198.60">Kovač</tspan></text>
+</svg>

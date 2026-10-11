@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+<polygon points="4.00,9.75 20.00,9.75 20.00,19.75 4.00,19.75" fill="#D3D9E0" stroke="#2A3038" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="5.00,18.75 9.00,10.75" fill="none" stroke="#2A3038" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="8.60,18.75 12.60,10.75" fill="none" stroke="#2A3038" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="12.20,18.75 16.20,10.75" fill="none" stroke="#2A3038" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="15.80,18.75 19.80,10.75" fill="none" stroke="#2A3038" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="3.00,6.75 21.00,6.75" fill="none" stroke="#14857D" stroke-width="1.50" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3,1.5"/>
+<polyline points="3.50,6.75 3.50,5.65" fill="none" stroke="#14857D" stroke-width="1.50" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="3.50,4.25 4.74,6.25 2.26,6.25" fill="#14857D" stroke="#14857D" stroke-width="0.60" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="20.50,6.75 20.50,5.65" fill="none" stroke="#14857D" stroke-width="1.50" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="20.50,4.25 21.74,6.25 19.26,6.25" fill="#14857D" stroke="#14857D" stroke-width="0.60" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

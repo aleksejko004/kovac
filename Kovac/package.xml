@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>Kovac</name>
+  <description>Kovač — an integrated design-to-manufacture environment built on FreeCAD.</description>
+  <version>0.1.0</version>
+  <date>2026-10-08</date>
+  <maintainer email="">Kovač project</maintainer>
+  <license file="LICENSE">LGPL-2.1-or-later</license>
+  <freecadmin>1.1.0</freecadmin>
+  <content>
+    <workbench>
+      <classname>KovacWorkbench</classname>
+      <subdirectory>./</subdirectory>
+      <icon>Resources/icons/light/app.svg</icon>
+    </workbench>
+    <preferencepack>
+      <name>Kovac Light</name>
+      <type>Theme</type>
+      <description>Kovač light look: viewport, selection, sketch and orientation-cube colors.</description>
+      <version>0.1.0</version>
+    </preferencepack>
+    <preferencepack>
+      <name>Kovac Dark</name>
+      <type>Theme</type>
+      <description>Kovač dark look: viewport, selection, sketch and orientation-cube colors.</description>
+      <version>0.1.0</version>
+    </preferencepack>
+  </content>
+</package>

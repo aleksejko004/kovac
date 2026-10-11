@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Every push: headless suite, then the M1, M2 and M3 GUI suites, on Windows and Linux.
+name: ci
+on: [push, pull_request]
+
+env:
+  FC_VERSION: "1.1.4"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: FreeCAD (portable)
+        shell: pwsh
+        run: |
+          $n = "FreeCAD_${env:FC_VERSION}-Windows-x86_64-py311"
+          Invoke-WebRequest "https://github.com/FreeCAD/FreeCAD/releases/download/${env:FC_VERSION}/$n.7z" -OutFile fc.7z
+          7z x fc.7z -ofc > $null
+          "KOVAC_FREECAD=$PWD\fc\$n" | Out-File -Append $env:GITHUB_ENV
+      # The runner has no GPU and Windows only offers OpenGL 1.1, which FreeCAD's 3D view
+      # can't start on. Mesa's software OpenGL next to FreeCAD.exe takes its place.
+      - name: Software OpenGL (Mesa)
+        shell: pwsh
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release download --repo pal1000/mesa-dist-win --pattern "*release-msvc.7z" -O mesa.7z
+          7z x mesa.7z -omesa > $null
+          $bin = Join-Path $env:KOVAC_FREECAD "bin"
+          "opengl32.dll", "libgallium_wgl.dll", "libglapi.dll" | ForEach-Object {
+            if (Test-Path "mesa\x64\$_") { Copy-Item "mesa\x64\$_" $bin }
+          }
+          "GALLIUM_DRIVER=llvmpipe" | Out-File -Append $env:GITHUB_ENV
+      - name: Headless tests
+        run: python tools/fc.py cmd tests/run.py
+      - name: GUI acceptance (M1)
+        run: python tests/run_gui.py
+      - name: GUI end to end (M2)
+        if: always()
+        run: python tests/run_gui.py gui_m2.py
+      - name: GUI drawings (M3)
+        if: always()
+        run: python tests/run_gui.py gui_m3.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: windows-results, path: build }
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: FreeCAD (AppImage, extracted)
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb libegl1 libxkbcommon-x11-0 libxcb-cursor0
+          curl -L -o fc.AppImage "https://github.com/FreeCAD/FreeCAD/releases/download/$FC_VERSION/FreeCAD_$FC_VERSION-Linux-x86_64-py311.AppImage"
+          chmod +x fc.AppImage && ./fc.AppImage --appimage-extract > /dev/null
+          echo "KOVAC_FREECAD=$PWD/squashfs-root" >> $GITHUB_ENV
+      - name: Headless tests
+        run: python3 tools/fc.py cmd tests/run.py
+      - name: GUI acceptance (M1)
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" python3 tests/run_gui.py
+      - name: GUI end to end (M2)
+        if: always()
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" python3 tests/run_gui.py gui_m2.py
+      - name: GUI drawings (M3)
+        if: always()
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" python3 tests/run_gui.py gui_m3.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: linux-results, path: build }

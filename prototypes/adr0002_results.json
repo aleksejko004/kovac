@@ -1,0 +1,93 @@
+{
+ "freecad": [
+  "1",
+  "1",
+  "4"
+ ],
+ "rows": [
+  {
+   "model": "partdesign",
+   "change": "resize",
+   "verdict": "error (loud)",
+   "regen_ms": 5.92,
+   "undo_restores": true,
+   "error": "Invalid edge link: ;#11:2;:G;XTR;:Hb3e:7,E.Edge5"
+  },
+  {
+   "model": "partdesign",
+   "change": "notch_upstream",
+   "verdict": "correct",
+   "regen_ms": 25.82,
+   "undo_restores": true,
+   "error": ""
+  },
+  {
+   "model": "partdesign",
+   "change": "extra_side_face",
+   "verdict": "correct",
+   "regen_ms": 17.03,
+   "undo_restores": true,
+   "error": ""
+  },
+  {
+   "model": "partdesign",
+   "change": "sketch_redrawn",
+   "verdict": "correct",
+   "regen_ms": 16.76,
+   "undo_restores": true,
+   "error": ""
+  },
+  {
+   "model": "partdesign",
+   "change": "extrude_length",
+   "verdict": "error (loud)",
+   "regen_ms": 4.31,
+   "undo_restores": true,
+   "error": "Invalid edge link: ;#11:2;:G;XTR;:H75:7,E.Edge5"
+  },
+  {
+   "model": "part",
+   "change": "resize",
+   "verdict": "error (loud)",
+   "regen_ms": 3.32,
+   "undo_restores": true,
+   "error": "Missing edge link: ;#11:2;:G;XTR;:H2e8:7,E.Edge5\n"
+  },
+  {
+   "model": "part",
+   "change": "notch_upstream",
+   "verdict": "correct",
+   "regen_ms": 15.6,
+   "undo_restores": true,
+   "error": ""
+  },
+  {
+   "model": "part",
+   "change": "extra_side_face",
+   "verdict": "correct",
+   "regen_ms": 10.52,
+   "undo_restores": true,
+   "error": ""
+  },
+  {
+   "model": "part",
+   "change": "sketch_redrawn",
+   "verdict": "correct",
+   "regen_ms": 9.01,
+   "undo_restores": true,
+   "error": ""
+  },
+  {
+   "model": "part",
+   "change": "extrude_length",
+   "verdict": "error (loud)",
+   "regen_ms": 3.04,
+   "undo_restores": true,
+   "error": "Missing edge link: ;#11:2;:G;XTR;:H1092:7,E.Edge5\n"
+  }
+ ],
+ "median_regen_ms": {
+  "partdesign": 4.8,
+  "part": 2.85
+ }
+}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+<polyline points="5.00,12.00 19.00,12.00" fill="none" stroke="#2A3038" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1.5,1.5"/>
+<polyline points="12.00,5.00 12.00,19.00" fill="none" stroke="#2A3038" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1.5,1.5"/>
+<polygon points="15.00,12.00 14.85,12.93 14.43,13.76 13.76,14.43 12.93,14.85 12.00,15.00 11.07,14.85 10.24,14.43 9.57,13.76 9.15,12.93 9.00,12.00 9.15,11.07 9.57,10.24 10.24,9.57 11.07,9.15 12.00,9.00 12.93,9.15 13.76,9.57 14.43,10.24 14.85,11.07" fill="#14857D" stroke="#14857D" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
