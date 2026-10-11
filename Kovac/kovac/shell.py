@@ -611,6 +611,7 @@ def activated():
     for ms in (0, 400):
         QtCore.QTimer.singleShot(ms, lambda: (arrange(), apply_visibility()))
     navigation.install()
+    navigation.install_selection_highlight()
     from kovac import drawmode, grid
     grid.start()
     drawmode.install()

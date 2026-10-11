@@ -649,6 +649,75 @@ def set_filter(kinds):
         Gui.Selection.addSelectionGate(selection.Gate(kinds))
 
 
+class _SelectionHighlight:
+    """Translucent wash over the whole shape of every selected object, not just the clicked
+    face -- layered under FreeCAD's own per-element selection colour, not replacing it (see
+    overlay.shape_node). Off while sketching: 2D sketch elements have no whole-body shape."""
+
+    def __init__(self):
+        self.node, self.view = None, None
+
+    def _clear(self):
+        if self.node is not None and self.view is not None:
+            from kovac import overlay
+            overlay.remove(self.node, self.view)
+        self.node = self.view = None
+
+    def _refresh(self):
+        self._clear()
+        try:
+            self._build()
+        except Exception:
+            pass      # a selection observer that raises can interrupt whatever called it (a
+                       # cube-click's own view-snap, mid-sequence) -- never let this one do that
+
+    def _build(self):
+        if in_edit():
+            return
+        view = Gui.activeView()
+        if view is None or not hasattr(view, "graphicsView"):
+            return
+        from kovac import overlay, palette
+        from pivy import coin
+        sep = None
+        for s in Gui.Selection.getSelectionEx("*", 0):
+            o = s.Object
+            shape = getattr(o, "Shape", None)
+            vo = getattr(o, "ViewObject", None)
+            if shape is None or shape.isNull() or (vo is not None and not vo.Visibility):
+                continue
+            sep = sep or coin.SoSeparator()
+            sep.addChild(overlay.shape_node(shape, palette.SEMANTIC["select"]))
+        if sep is not None:
+            self.node = overlay.add(sep, view)
+            self.view = view
+
+    def addSelection(self, *_a):
+        self._refresh()
+
+    def removeSelection(self, *_a):
+        self._refresh()
+
+    def setSelection(self, *_a):
+        self._refresh()
+
+    def clearSelection(self, *_a):
+        try:
+            self._clear()
+        except Exception:
+            pass
+
+
+_sel_highlight = None
+
+
+def install_selection_highlight():
+    global _sel_highlight
+    if _sel_highlight is None:
+        _sel_highlight = _SelectionHighlight()
+        Gui.Selection.addObserver(_sel_highlight)
+
+
 def install(view=None):
     view = view or Gui.activeView()
     if view is None or not hasattr(view, "graphicsView"):

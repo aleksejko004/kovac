@@ -205,6 +205,14 @@ def scenario():
     click(to_qt(V(front_c.x - 15, front_c.y, front_c.z)), QtCore.Qt.ShiftModifier)
     yield 100
     check("Shift+click adds the front face", len(picks()) == 2, picks())
+    check("selecting a face shades the whole body, not just the clicked face",
+          navigation._sel_highlight.node is not None)
+    Gui.Selection.clearSelection()
+    yield 100
+    check("clearing the selection removes the whole-body shading", navigation._sel_highlight.node is None)
+    click(to_qt(V(top_c.x - 15, top_c.y, top_c.z)))
+    click(to_qt(V(front_c.x - 15, front_c.y, front_c.z)), QtCore.Qt.ShiftModifier)
+    yield 100
     tl = shell._ui["timeline"].widget()
     check("timeline highlights the creating feature", tl.list.currentRow() >= 0, tl.list.currentRow())
     commands.run("Kovac_Measure")
