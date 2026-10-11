@@ -251,7 +251,8 @@ def scenario():
     hidden = [b.defaultAction().objectName() for b in ribbon_buttons if not b.isVisible()]
     check("the sketch ribbon shows every tool (51, variants behind arrows), none cut off",
           want <= set(acts) and len(acts) >= 51 and len(ribbon_buttons) >= 30 and not hidden,
-          (len(acts), len(ribbon_buttons), hidden, sorted(want - set(acts))))
+          ("window %d px, screen %d px" % (mw.width(), mw.screen().availableGeometry().width()),
+           len(acts), len(ribbon_buttons), hidden, sorted(want - set(acts))))
     yield 400                                 # the task panel watcher runs every 300 ms
     tasks = mw.findChild(QtWidgets.QDockWidget, "Tasks")
     check("the sketcher's task panel stays closed", tasks is None or not tasks.isVisible())

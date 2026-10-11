@@ -31,6 +31,10 @@ jobs:
             if (Test-Path "mesa\x64\$_") { Copy-Item "mesa\x64\$_" $bin }
           }
           "GALLIUM_DRIVER=llvmpipe" | Out-File -Append $env:GITHUB_ENV
+      - name: Screen 1920 x 1080 (the runner starts at 1024 x 768)
+        continue-on-error: true
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
       - name: Headless tests
         run: python tools/fc.py cmd tests/run.py
       - name: GUI acceptance (M1)
