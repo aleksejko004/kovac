@@ -108,6 +108,20 @@ def create():
     def qicon(name):
         return QtGui.QIcon(kovac.icon(name))
 
+    class SelectionSync:
+        """FreeCAD's selection observer for the tree, kept off the tree itself: its callbacks are
+        named setSelection and clearSelection, the same as QAbstractItemView's own methods, and
+        on the widget they replaced them -- Qt's click-to-select called our re-sync instead, which
+        read back FreeCAD's still-empty selection, so no row could be selected by mouse at all."""
+
+        def __init__(self, tree):
+            self.tree = tree
+
+        def addSelection(self, *_):
+            self.tree.from_selection()
+
+        removeSelection = setSelection = clearSelection = addSelection
+
     class Tree(QtWidgets.QTreeWidget):
         def __init__(self):
             super().__init__()
@@ -134,7 +148,8 @@ def create():
             self.timer = QtCore.QTimer(self, singleShot=True, interval=30)
             self.timer.timeout.connect(self.rebuild)
             App.addDocumentObserver(self)
-            Gui.Selection.addObserver(self)
+            self.sel_observer = SelectionSync(self)
+            Gui.Selection.addObserver(self.sel_observer)
             self.rebuild()
 
         # ---------------------------------------------------- build
@@ -323,7 +338,6 @@ def create():
                 it.setSelected(it.data(0, OBJ) in names)
             self.syncing = False
 
-        addSelection = removeSelection = setSelection = clearSelection = from_selection
 
         # ---------------------------------------------------- document observer
         def slotCreatedObject(self, _o):
