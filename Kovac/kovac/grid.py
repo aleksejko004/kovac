@@ -299,25 +299,19 @@ def _corners(box):
 
 
 def _clip_for(it, centre, half):
-    """Push the far clip plane out to cover the grid, not just the model; the near plane stays
-    sized to the model alone.
+    """Near and far clip planes that take in both the model and the grid.
 
     The grid sits in a SoSkipBoundingGroup (EXCLUDE_BBOX) so 'fit all' never zooms out to show
-    it -- but Coin's automatic near/far clipping (Gui::View3DInventorViewer runs it every
-    frame, strategy BOUNDING_BOX by default) walks the very same scene bounding box, so it
-    never saw the grid either. It then clips the far plane right at the model's edge; at some
-    camera tilts that clip plane crosses the ground close to the camera, and the grid vanishes
-    beyond it, with the cut line's position and angle on screen changing with the view. We take
-    over clipping (grid on or off, in sketches too): auto-clipping off, near/far set from the
-    camera's own view direction, each tick.
+    it -- but Coin's automatic clipping walks the same scene bounding box, so it never saw the
+    grid and cut it off wherever the clip planes crossed the ground. We take over clipping
+    (grid on or off, in sketches too): auto-clipping off, planes set each tick from the depth
+    of every model and grid bounding-box corner along the camera's view direction.
 
-    A first version sized both planes from one bounding sphere around model and grid together
-    -- wrong, because a far-off grid corner inflates that sphere's radius enough to push the
-    *near* plane out past the model itself, slicing it (seen live, not assumed: a screenshot
-    showed a model with its near side sheared off). Near and far are different problems: near
-    must stay tight to the model alone, far has to reach the grid. Measuring the depth of each
-    bounding-box corner along the camera's own view direction, not a sphere radius, keeps them
-    properly separate -- near is the closest model corner, regardless of where the grid's are."""
+    Depth along the view, not distance: an earlier version used one bounding sphere, and a
+    far grid corner inflated its radius until the near plane passed the model and sliced it.
+    With depths, more corners can only widen the range -- the near plane moves closer, never
+    past anything. Sizing near from the model alone, as a later version did, cut away the half
+    of the grid between the camera and an empty or small model."""
     from pivy import coin
     from kovac import navigation
     view = it.view
@@ -339,8 +333,8 @@ def _clip_for(it, centre, half):
         cx, cy = centre
         grid_corners = [V(x, y, 0) for x in (cx - half, cx + half) for y in (cy - half, cy + half)]
     model_corners = _corners(model_box) if model_box.isValid() else [pos + forward]
-    near = min((c - pos).dot(forward) for c in model_corners)
-    far = max((c - pos).dot(forward) for c in model_corners + grid_corners)
+    depths = [(c - pos).dot(forward) for c in model_corners + grid_corners]
+    near, far = min(depths), max(depths)       # depth along the view, not a sphere: the grid's corners can only pull near closer
     model_size = model_box.DiagonalLength if model_box.isValid() else 0.0
     margin = max(model_size, half) * 0.02 + 1e-3    # a hair of slack either side
     near, far = near - margin, far + margin
