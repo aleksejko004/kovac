@@ -744,6 +744,64 @@ def scenario():
           is_current and fp1_gone and not left_over,
           (is_current, fp1_gone, sorted(o.Name for o in left_over)))
 
+    # -- group-selecting multiple history items: Delete key, and grouping reads as one thing --
+    tree = shell._ui["tree"].widget()
+    tl = shell._ui["timeline"].widget()
+    before_bodies = len(bodies())
+    for i, x0 in enumerate((60, 80, 100)):
+        s = side_rect("Del%d" % i, x0)
+        App.ActiveDocument.recompute()
+        ed = editor.start(features.Extrude, Profile=s, Length=5, Operation="New body")
+        yield 100
+        ed.accept()
+        yield 150
+    check("three bodies added for the group-select tests", len(bodies()) == before_bodies + 3, len(bodies()))
+
+    # browser: multi-select two bodies, Delete key removes both as one undo step
+    tree.clearSelection()
+    body_items = [it for it in tree.walk() if tree.obj(it) is not None and hasattr(tree.obj(it), "BodyId")]
+    for it in body_items[-2:]:
+        it.setSelected(True)
+    yield 100
+    QtWidgets.QApplication.sendEvent(tree, QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Delete, QtCore.Qt.NoModifier))
+    yield 200
+    after_browser_delete = len(bodies())
+    App.ActiveDocument.undo()
+    yield 200
+    check("browser: Delete key removes every selected body, one undo step",
+          after_browser_delete == before_bodies + 1 and len(bodies()) == before_bodies + 3,
+          (before_bodies, after_browser_delete, len(bodies())))
+
+    # timeline: multi-select two features, Delete key removes both as one undo step
+    tl.rebuild()
+    yield 100
+    feat_items = [it for it in [tl.list.item(i) for i in range(tl.list.count())] if not it.data(QtCore.Qt.UserRole + 1)]
+    before_feats = len(feat_items)
+    for it in feat_items[-2:]:
+        it.setSelected(True)
+    yield 100
+    QtWidgets.QApplication.sendEvent(tl.list, QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Delete, QtCore.Qt.NoModifier))
+    yield 200
+    tl.rebuild()
+    after_feats = len([it for it in [tl.list.item(i) for i in range(tl.list.count())] if not it.data(QtCore.Qt.UserRole + 1)])
+    App.ActiveDocument.undo()
+    tl.rebuild()
+    yield 200
+    check("timeline: Delete key removes every selected feature, one undo step",
+          after_feats == before_feats - 2, (before_feats, after_feats))
+
+    # grouping: every member names the group and shares a background, not just a bare "▾"
+    feat_items = [it for it in [tl.list.item(i) for i in range(tl.list.count())] if not it.data(QtCore.Qt.UserRole + 1)]
+    to_group = [tl.obj(it) for it in feat_items[-2:]]
+    tl.group(to_group, "SideBodies")
+    yield 150
+    rows = [tl.list.item(i) for i in range(tl.list.count())]
+    grouped_rows = [it for it in rows if "SideBodies" in it.text()]
+    tints = {it.background().color().name() for it in grouped_rows}
+    check("grouped items name the group and share a background, instead of looking separate",
+          len(grouped_rows) == 2 and len(tints) == 1 and list(tints)[0] != "#000000",
+          ([it.text() for it in grouped_rows], tints))
+
 
 def run(gen):
     try:

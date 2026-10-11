@@ -97,6 +97,12 @@ def create():
             super().dropEvent(ev)
             QtCore.QTimer.singleShot(0, lambda: self.owner.dropped(key))
 
+        def keyPressEvent(self, ev):
+            if ev.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
+                self.owner.delete_selected()
+                return
+            super().keyPressEvent(ev)
+
     class Timeline(QtWidgets.QWidget):
         def __init__(self):
             super().__init__()
@@ -167,11 +173,15 @@ def create():
                     continue
                 vo = getattr(o, "ViewObject", None)
                 icon = QtGui.QIcon(kovac.icon("sketch")) if o.TypeId.startswith("Sketcher::") else (vo.Icon if vo else QtGui.QIcon())
-                it = QtWidgets.QListWidgetItem(icon, "▾" if g else "")
+                # Named, not just "▾": a bare arrow on every member of every group looks the
+                # same whichever group it is, or even that it's grouped at all rather than each
+                # one just happening to have its own little arrow -- the name on every member
+                # (not only the first) reads as one thing even scrolled to the middle of it.
+                it = QtWidgets.QListWidgetItem(icon, ("▾ " + g) if g else "")
                 st = state(o)
                 active = not hist or o not in hist or hist.index(o) < marker_at
                 tip = o.Label + ("" if st == "ok" else "  —  " + (getattr(o, "Status", "") or st))
-                it.setToolTip(tip + ("" if active else "  (rolled back)"))
+                it.setToolTip((("Group %s: " % g) if g else "") + tip + ("" if active else "  (rolled back)"))
                 it.setData(OBJ, (o.Document.Name, o.Name))
                 if st != "ok":
                     col = QtGui.QColor(t[{"error": "error", "warning": "warning", "suppressed": "border"}[st]])
@@ -180,6 +190,8 @@ def create():
                 elif not active:
                     it.setForeground(QtGui.QColor(t["text_muted"]))
                     it.setBackground(QtGui.QColor(t["surface2"]))
+                elif g:         # a faint, shared tint so the group's members read as one row of things
+                    it.setBackground(QtGui.QColor(palette.mix(t["viewport_bottom"], palette.accent(), 0.12)))
                 self.list.addItem(it)
             if hist and not marker_done:
                 self._add_marker()
@@ -284,8 +296,37 @@ def create():
                 m.addAction("Collapse group", lambda: (self.collapsed.add(g), self.rebuild()))
                 m.addAction("Ungroup", lambda: self.group([x for x in features(doc) if getattr(x, "TimelineGroup", "") == g], ""))
             m.addSeparator()
-            m.addAction("Delete", lambda: self.run("Delete " + o.Label, lambda: model.remove(doc, o)))
+            if len(sel) > 1:
+                m.addAction("Delete %d selected" % len(sel), self.delete_selected)
+            else:
+                m.addAction("Delete", lambda: self.run("Delete " + o.Label, lambda: model.remove(doc, o)))
             m.exec(self.list.viewport().mapToGlobal(pos))
+
+        def delete_selected(self):
+            """Every selected item (a selected collapsed group stands for all its members), as
+            one undo step; in dependency order so one freshly-selected feature using another
+            doesn't block it. Also reachable from the Delete / Backspace key."""
+            doc = App.ActiveDocument
+            if doc is None:
+                return
+            objs = []
+            for it in self.list.selectedItems():
+                if it.data(MARK):
+                    continue
+                if it.text().startswith("▸"):               # a collapsed group row: every member
+                    g = getattr(self.obj(it), "TimelineGroup", "")
+                    objs += [x for x in features(doc) if getattr(x, "TimelineGroup", "") == g]
+                else:
+                    o = self.obj(it)
+                    if o is not None:
+                        objs.append(o)
+            objs = list(dict.fromkeys(objs))                 # de-duplicate, keep order
+            if not objs:
+                return
+            hist = model.items(doc)
+            objs.sort(key=lambda o: hist.index(o) if o in hist else -1, reverse=True)   # later ones (likely dependents) first
+            label = "Delete " + objs[0].Label if len(objs) == 1 else "Delete %d features" % len(objs)
+            self.run(label, lambda: [model.remove(doc, o) for o in objs])
 
         def roll(self, k):
             doc = App.ActiveDocument

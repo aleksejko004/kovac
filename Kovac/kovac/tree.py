@@ -244,6 +244,7 @@ def create():
         def menu(self, pos):
             it = self.itemAt(pos)
             o = self.obj(it) if it else None
+            sel = [x for x in (self.obj(s) for s in self.selectedItems()) if x is not None]
             m = QtWidgets.QMenu(self)
             if o is not None:
                 m.addAction("Rename", lambda: self.editItem(it, 0))
@@ -252,18 +253,43 @@ def create():
                     m.addAction("Activate", lambda: self.double(it, 0))
                 if role(o) == "body":
                     m.addAction("Material…", lambda: commands.run("Kovac_Material"))
-                m.addAction("Delete", lambda: self.delete(o))
+                if len(sel) > 1 and o in sel:
+                    m.addAction("Delete %d selected" % len(sel), self.delete_selected)
+                else:
+                    m.addAction("Delete", lambda: self.delete(o))
             m.addAction("Save current view…", self.save_view)
             m.exec(self.viewport().mapToGlobal(pos))
 
+        def keyPressEvent(self, ev):
+            if ev.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
+                self.delete_selected()
+                return
+            super().keyPressEvent(ev)
+
         def delete(self, o):
+            self.delete_selected([o])
+
+        def delete_selected(self, objs=None):
+            """Every selected item (or `objs`, for the single-item context menu action and the
+            Delete / Backspace key), as one undo step."""
             from kovac import model
+            objs = objs if objs is not None else [self.obj(it) for it in self.selectedItems()]
+            objs = list(dict.fromkeys(o for o in objs if o is not None))
+            if not objs:
+                return
+            doc = objs[0].Document
+            hist = model.items(doc)
+            objs.sort(key=lambda o: hist.index(o) if o in hist else -1, reverse=True)   # dependents first
+            label = "Delete %s" % objs[0].Label if len(objs) == 1 else "Delete %d items" % len(objs)
             try:
-                with commands.transaction("Delete %s" % o.Label, o.Document):
-                    if o in model.items(o.Document):
-                        model.remove(o.Document, o)
-                    else:
-                        o.Document.removeObject(o.Name)
+                with commands.transaction(label, doc):
+                    for o in objs:
+                        if doc.getObject(o.Name) is None:      # already gone (e.g. with its body)
+                            continue
+                        if o in model.items(doc):
+                            model.remove(doc, o)
+                        else:
+                            doc.removeObject(o.Name)
             except Exception as e:
                 commands.report(e)
 
