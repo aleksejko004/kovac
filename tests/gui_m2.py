@@ -867,6 +867,40 @@ def scenario():
     App.ActiveDocument.undo()
     yield 150
 
+    # -- 3D curve: a sketch's free B-spline leaves the sketch; its points then drag in 3D --
+    App.newDocument("Curve3DTest")
+    yield 300
+    from kovac import curve3d
+    sk3 = sketchmode.create("XY")
+    i = sk3.addGeometry(Part.BSplineCurve([V(0, 0, 0), V(10, 15, 0), V(25, -10, 0), V(40, 5, 0)], None, None, False, 3, None, False))
+    sk3.exposeInternalGeometry(i)
+    App.ActiveDocument.recompute()
+    yield 500
+    command("Kovac_Curve3D")
+    yield 300
+    ed3 = curve3d.current()
+    check("3D curve: the sketch's free B-spline becomes a 3D curve, open for editing",
+          ed3 is not None and not sketchmode.in_sketch() and not sk3.Geometry,
+          (ed3, sketchmode.in_sketch(), len(sk3.Geometry)))
+    views.go(view(), views.view_rotation((0, -1, 0)), fit=True)      # from the front: dragging up lifts the point
+    yield 800
+    p1 = V(ed3.obj.Points[1])
+    it3 = navigation.install()                  # the new document's own view
+    x, y = it3.qt(view().getPointOnViewport(p1))
+    start = QtCore.QPoint(int(x), int(y))
+    L = QtCore.Qt.LeftButton
+    for t, q, held in [(QtCore.QEvent.MouseButtonPress, start, L)] + \
+            [(QtCore.QEvent.MouseMove, start - QtCore.QPoint(0, 8 * k), L) for k in range(1, 11)] + \
+            [(QtCore.QEvent.MouseButtonRelease, start - QtCore.QPoint(0, 80), QtCore.Qt.NoButton)]:
+        QtWidgets.QApplication.sendEvent(vp(), QtGui.QMouseEvent(t, QtCore.QPointF(q), QtCore.QPointF(vp().mapToGlobal(q)),
+                                                                 QtCore.Qt.LeftButton if t != QtCore.QEvent.MouseMove else QtCore.Qt.NoButton,
+                                                                 held, QtCore.Qt.NoModifier))
+    yield 200
+    p1b = V(ed3.obj.Points[1])
+    check("3D curve: dragging a point in a side view lifts it out of the sketch plane, one undo step",
+          p1b.z > 2 and App.ActiveDocument.UndoNames[:1] == ["Move curve point"], (p1, p1b, App.ActiveDocument.UndoNames[:2]))
+    curve3d.finish()
+
 def run(gen):
     try:
         delay = next(gen)

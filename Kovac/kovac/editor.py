@@ -309,6 +309,9 @@ class ObjectRow(_Row):
 
     def resolve(self, obj, sub):
         if self.what in ("sketch", "sketches"):
+            from kovac import curve3d
+            if self.prop == "Path" and curve3d.is_curve(obj):      # a path may leave the plane
+                return obj
             return obj if obj.TypeId.startswith("Sketcher::") else None
         if self.what in ("body", "bodies"):
             return obj.BodyId if type(getattr(obj, "Proxy", None)).__name__ == "BodyProxy" else None
@@ -836,6 +839,8 @@ def close_current():
     enough that Cancelling the panel just opened could abort the transaction the previous
     command's own feature was created under, deleting it out from under its own panel (a
     ReferenceError on fp.Document, since nothing closed the first panel first)."""
+    from kovac import curve3d
+    curve3d.finish()
     if _current is not None:
         _current.reject() if _current.new else _current.accept()
 

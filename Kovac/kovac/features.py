@@ -257,6 +257,9 @@ class Revolve(model.Feature):
 # ---------------------------------------------------------------- Sweep / Loft
 
 def sketch_wire(sketch):
+    from kovac import curve3d
+    if curve3d.is_curve(sketch):            # already in place, in 3D
+        return Part.Wire(sketch.Shape.Edges)
     edges = [g.toShape() for i, g in enumerate(sketch.Geometry)
              if not sketch.getConstruction(i) and not isinstance(g, Part.Point)]
     w = Part.Wire(Part.__sortEdges__(edges))

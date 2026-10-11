@@ -18,7 +18,7 @@ MODES = ("Design", "Drawing", "Make", "Simulate", "Render")
 # mode -> [(group label, [command ids])]; our own group names, by function
 # an entry that is a list becomes one dropdown button
 GROUPS = {
-    "Design": [("Sketch", ["Kovac_Sketch"]),
+    "Design": [("Sketch", ["Kovac_Sketch", "Kovac_Curve3D"]),
                ("Form", ["Kovac_Extrude", "Kovac_Revolve", "Kovac_Sweep", "Kovac_Loft", "Kovac_Hole", "Kovac_Thread",
                          ["Kovac_Box", "Kovac_Cylinder", "Kovac_Sphere", "Kovac_Cone", "Kovac_Torus"]]),
                ("Shape", ["Kovac_FacePull", "Kovac_Fillet", "Kovac_Chamfer", "Kovac_Shell", "Kovac_Draft", "Kovac_DeleteFace",

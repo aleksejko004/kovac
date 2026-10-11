@@ -29,6 +29,8 @@ def role(obj):
         return "body" if not obj.Shape.isNull() else "machinery"
     if proxy == "HistoryProxy":
         return "machinery"
+    if proxy == "Curve3DProxy":
+        return "sketch"
     if proxy == "SectionProxy":
         return "analysis"
     if proxy in ("DatumPlane", "DatumAxis", "DatumPoint"):
@@ -250,7 +252,10 @@ def create():
             if col == EYE:
                 return
             o = self.obj(it)
-            if o is not None and role(o) == "component":
+            from kovac import curve3d
+            if curve3d.is_curve(o):
+                curve3d.edit(o)
+            elif o is not None and role(o) == "component":
                 Gui.ActiveDocument.ActiveView.setActiveObject("part", o)
                 self.rebuild()
             elif it.data(0, VIEW):

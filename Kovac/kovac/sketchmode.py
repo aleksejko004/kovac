@@ -45,7 +45,7 @@ SKETCH_TOOLS = [      # an inner list is one button with its variants behind the
                     ("Sketcher_ConstrainDistance", "c_dist")],
                    [("Sketcher_ConstrainRadius", "c_radius"), ("Sketcher_ConstrainDiameter", "c_diameter")],
                    ("Sketcher_ConstrainAngle", "c_angle"), ("Sketcher_ToggleDrivingConstraint", "c_driving")]),
-    ("3D", [("Sketcher_Projection", "project"), ("Sketcher_CarbonCopy", "carbon"), ("Sketcher_ViewSketch", "sk_look"),
+    ("3D", [("Kovac_Curve3D", "spline"), ("Sketcher_Projection", "project"), ("Sketcher_CarbonCopy", "carbon"), ("Sketcher_ViewSketch", "sk_look"),
             ("Sketcher_ViewSection", "sk_section")]),
 ]
 _ICON_OF = {cid: icon for _, tools in SKETCH_TOOLS for e in tools for cid, icon in (e if isinstance(e, list) else [e])}
@@ -88,6 +88,8 @@ def overview(view=None, fit=None):
 def start(then=None):
     """Sketch on the selected flat face/plane, or let the user pick one; `then` is a sketch
     tool to start once the sketch is open."""
+    from kovac import curve3d
+    curve3d.finish()
     doc = App.ActiveDocument
     if doc is None:
         from kovac import startpage

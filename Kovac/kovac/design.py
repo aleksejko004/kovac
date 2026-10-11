@@ -6,7 +6,7 @@ import FreeCADGui as Gui
 import Part
 
 import kovac
-from kovac import commands, datum, editor, features, model, modify, sketchmode, sketchtools
+from kovac import commands, curve3d, datum, editor, features, model, modify, sketchmode, sketchtools
 
 V = App.Vector
 
@@ -245,6 +245,8 @@ COMMANDS = [
      sketchtools.polyline, "polyline", "G, U"),
     ("Kovac_PolygonAround", "Polygon around a circle", "Regular polygon whose sides touch the circle you draw (circumscribed)",
      sketchtools.polygon_around, "polygon_out", "G, P, C"),
+    ("Kovac_Curve3D", "3D curve", "A curve whose points move in 3D: from a sketch's free B-spline, or new; drag its points",
+     curve3d.command, "spline", "G, 3, D"),
     ("Kovac_ConstrainMidpoint", "Midpoint", "Select a point and a line or arc: constrain the point to its midpoint",
      sketchtools.midpoint, "c_midpoint", "K, M"),
     ("Kovac_Delete", "Delete", "Delete the selection", delete, "delete", ""),
