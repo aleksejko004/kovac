@@ -12,7 +12,6 @@ from kovac import palette
 V = App.Vector
 TARGET_PX = 28          # minor grid spacing aims for this many screen pixels
 _state = {"node": None, "step": None, "timer": None, "view": None}
-_clip_saved = {}        # view id -> Coin's own auto-clipping strategy, to give back on Grid off
 
 
 def enabled():
@@ -192,6 +191,9 @@ def _build(view, s, half, centre=(0.0, 0.0)):
     light = coin.SoLightModel()
     light.model = coin.SoLightModel.BASE_COLOR
     root.addChild(light)
+    blend = coin.SoTransparencyType()     # blend in place: the default delays see-through shapes to a
+    blend.value = coin.SoTransparencyType.BLEND   # sorted pass that drops the grid (no bounding box)
+    root.addChild(blend)
 
     def shade(colour, x, y):
         """(colour, opacity): real transparency, faded to nothing by the edge, not a fade
@@ -273,7 +275,7 @@ def refresh(force=False):
         _sketch_grid(Gui.ActiveDocument.getInEdit(), s)
     if not enabled() or editing:            # a sketch draws its own grid
         remove()
-        _restore_clip(it)
+        _clip_for(it, None, 0)          # still ours: Coin's own clipping slices a model the camera sits in
         _state["step"] = s
         return
     # the grid follows the view: centred under it, big enough to fill it, so it never runs out
@@ -306,8 +308,8 @@ def _clip_for(it, centre, half):
     never saw the grid either. It then clips the far plane right at the model's edge; at some
     camera tilts that clip plane crosses the ground close to the camera, and the grid vanishes
     beyond it, with the cut line's position and angle on screen changing with the view. We take
-    over clipping while the grid is on: auto-clipping off, near/far set from the camera's own
-    view direction, each tick.
+    over clipping (grid on or off, in sketches too): auto-clipping off, near/far set from the
+    camera's own view direction, each tick.
 
     A first version sized both planes from one bounding sphere around model and grid together
     -- wrong, because a far-off grid corner inflates that sphere's radius enough to push the
@@ -315,50 +317,42 @@ def _clip_for(it, centre, half):
     showed a model with its near side sheared off). Near and far are different problems: near
     must stay tight to the model alone, far has to reach the grid. Measuring the depth of each
     bounding-box corner along the camera's own view direction, not a sphere radius, keeps them
-    properly separate -- near is the closest model corner, regardless of where the grid's are.
-    Keyed by the cached Interactor, not the view: FreeCAD can hand back a fresh Python wrapper
-    for the same view on each Gui.activeView() call (navigation.install() exists for the same
-    reason), so the view object itself is not a safe dict key across calls."""
+    properly separate -- near is the closest model corner, regardless of where the grid's are."""
     from pivy import coin
     from kovac import navigation
     view = it.view
     rm = view.getViewer().getSoRenderManager()
-    if it not in _clip_saved:
-        _clip_saved[it] = rm.getAutoClipping()
     rm.setAutoClipping(coin.SoRenderManager.NO_AUTO_CLIPPING)
     cam = view.getCameraNode()
     pos = V(*cam.position.getValue().getValue())
     forward = navigation.camera_focus(cam) - pos
     forward = forward.normalize() if forward.Length > 1e-9 else V(0, 0, -1)
-    model_box = App.BoundBox()
-    doc = App.ActiveDocument
-    for o in doc.Objects if doc else []:
-        vo = getattr(o, "ViewObject", None)
-        shape = getattr(o, "Shape", None)
-        if vo is not None and vo.Visibility and shape is not None and not shape.isNull():
-            model_box.add(shape.BoundBox)
-    cx, cy = centre
-    grid_corners = [V(x, y, 0) for x in (cx - half, cx + half) for y in (cy - half, cy + half)]
+    model_box = App.BoundBox()     # everything drawn (overlays, arrows, plane picker too), minus the grid itself
+    bba = coin.SoGetBoundingBoxAction(rm.getViewportRegion())
+    bba.apply(view.getSceneGraph())
+    sb = bba.getBoundingBox()
+    if not sb.isEmpty():
+        model_box.add(V(*sb.getMin().getValue()))
+        model_box.add(V(*sb.getMax().getValue()))
+    grid_corners = []
+    if centre is not None:
+        cx, cy = centre
+        grid_corners = [V(x, y, 0) for x in (cx - half, cx + half) for y in (cy - half, cy + half)]
     model_corners = _corners(model_box) if model_box.isValid() else [pos + forward]
     near = min((c - pos).dot(forward) for c in model_corners)
     far = max((c - pos).dot(forward) for c in model_corners + grid_corners)
     model_size = model_box.DiagonalLength if model_box.isValid() else 0.0
     margin = max(model_size, half) * 0.02 + 1e-3    # a hair of slack either side
-    near, far = max(near - margin, 1e-3), far + margin
+    near, far = near - margin, far + margin
+    if not cam.getTypeId().isDerivedFrom(coin.SoOrthographicCamera.getClassTypeId()):
+        near = max(near, 1e-3)
+    # An orthographic camera may sit inside the model (fit-all leaves it at the model's edge
+    # and orbiting swings it through); its projection has no eye point, so a negative near
+    # plane is valid and keeps whatever lies behind the camera position drawn, not sliced off.
     if far <= near:
         far = near + 1.0
     cam.nearDistance.setValue(near)
     cam.farDistance.setValue(far)
-
-
-def _restore_clip(it):
-    """Give Coin back its own auto-clipping once the grid is off or a sketch is open."""
-    if it not in _clip_saved:
-        return
-    try:
-        it.view.getViewer().getSoRenderManager().setAutoClipping(_clip_saved.pop(it))
-    except Exception:
-        _clip_saved.pop(it, None)
 
 
 def _ground_centre(it):
