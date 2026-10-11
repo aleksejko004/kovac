@@ -946,6 +946,34 @@ def scenario():
     edm.accept()
     yield 300
 
+    # -- Move in a sketch: a corner dragged up out of the plane takes both its lines into 3D --
+    App.newDocument("Move3DTest")
+    yield 300
+    skc = sketchmode.create("XY")
+    for a, b in ((V(0, 0, 0), V(40, 0, 0)), (V(40, 0, 0), V(40, 20, 0)), (V(40, 20, 0), V(0, 20, 0)), (V(0, 20, 0), V(0, 0, 0))):
+        skc.addGeometry(Part.LineSegment(a, b))
+    App.ActiveDocument.recompute()
+    yield 400
+    vtx = next(k for k in range(20) if skc.getGeoVertexIndex(k) == (0, 2))
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(skc, "Vertex%d" % (vtx + 1))
+    command("Kovac_Move")
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 800
+    tri = move._session.triad
+    itc = navigation.install()
+    p, axes = tri.t.frame()
+    pxc = itc.px_size()
+    scc = lambda q: QtCore.QPointF(*itc.qt(view().getPointOnViewport(q)))   # noqa: E731
+    drag_vp(scc(p + axes[2] * move.ARROW_PX * pxc * 0.8), scc(p + axes[2] * (move.ARROW_PX * pxc * 0.8 + 15)))
+    yield 200
+    lifted = [o for o in App.ActiveDocument.Objects if curve3d.is_curve(o)]
+    tops = [max(q.z for q in o.Points) for o in lifted]
+    check("Move in a sketch: dragging a corner up lifts it and both its lines out of the plane, one undo step",
+          len(skc.Geometry) == 2 and len(lifted) == 2 and all(z > 2 for z in tops) and
+          App.ActiveDocument.UndoNames[:1] == ["Move"], (len(skc.Geometry), tops, App.ActiveDocument.UndoNames[:2]))
+    move.finish()
+
 def run(gen):
     try:
         delay = next(gen)

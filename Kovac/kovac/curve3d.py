@@ -21,13 +21,21 @@ def is_curve(obj):
     return type(getattr(obj, "Proxy", None)).__name__ == "Curve3DProxy"
 
 
-def curve_shape(points, degree=3, closed=False):
-    """Clamped (open) or periodic (closed) B-spline with these control points."""
+def curve_shape(points, degree=3, closed=False, knots=(), mults=(), weights=()):
+    """Clamped (open) or periodic (closed) B-spline with these control points. Knots, mults
+    and weights, when given and consistent, keep an exact shape (an arc or circle taken out of
+    a sketch); otherwise the knots are uniform."""
     pts = [V(p) for p in points]
     n = len(pts)
     if n < 2:
         return Part.Shape()
     c = Part.BSplineCurve()
+    if knots and len(mults) == len(knots) and (not weights or len(weights) == n):
+        try:
+            c.buildFromPolesMultsKnots(pts, list(mults), list(knots), closed, degree, list(weights) or None)
+            return c.toShape()
+        except Exception:
+            c = Part.BSplineCurve()
     if closed and n > 2:
         deg = min(degree, n - 1)
         c.buildFromPolesMultsKnots(pts, [1] * (n + 1), [float(k) for k in range(n + 1)], True, deg)
@@ -44,10 +52,18 @@ class Curve3DProxy:
         obj.addProperty("App::PropertyVectorList", "Points", "Curve", "control points")
         obj.addProperty("App::PropertyBool", "Closed", "Curve", "closed loop")
         obj.addProperty("App::PropertyInteger", "Degree", "Curve", "polynomial degree").Degree = 3
+        self.exact_props(obj)
         obj.Proxy = self
 
+    @staticmethod
+    def exact_props(obj):
+        for prop, kind in (("Knots", "FloatList"), ("Mults", "IntegerList"), ("Weights", "FloatList")):
+            if not hasattr(obj, prop):
+                obj.addProperty("App::Property" + kind, prop, "Curve", "exact shape (cleared when points are added or removed)", 4)
+
     def execute(self, obj):
-        obj.Shape = curve_shape(obj.Points, obj.Degree, obj.Closed)
+        obj.Shape = curve_shape(obj.Points, obj.Degree, obj.Closed, getattr(obj, "Knots", ()),
+                                getattr(obj, "Mults", ()), getattr(obj, "Weights", ()))
 
     def dumps(self):
         return None
@@ -56,10 +72,11 @@ class Curve3DProxy:
         return None
 
 
-def create(doc, points, name="Curve3D", closed=False, degree=3):
+def create(doc, points, name="Curve3D", closed=False, degree=3, knots=(), mults=(), weights=()):
     obj = doc.addObject("Part::FeaturePython", name)
     Curve3DProxy(obj)
     obj.Points, obj.Closed, obj.Degree = [V(p) for p in points], closed, degree
+    obj.Knots, obj.Mults, obj.Weights = list(knots), list(mults), list(weights)
     vo = getattr(obj, "ViewObject", None)
     if vo is not None:
         vo.Proxy = 0
@@ -96,13 +113,27 @@ def from_sketch(sk, indices=None):
     with commands.transaction("3D curve", doc):
         for i in indices:
             g = sk.Geometry[i]
-            pts = [pl.multVec(p) for p in g.getPoles()]
-            made.append(create(doc, pts, "Curve3D", closed=g.isPeriodic(), degree=g.Degree))
+            made.append(from_geometry(doc, g, pl))
         helpers = [k for k, c in enumerate(sk.Constraints) if c.Type == "InternalAlignment" and c.Second in indices]
         drop = sorted({sk.Constraints[k].First for k in helpers} | set(indices), reverse=True)
         for k in drop:
             sk.delGeometry(k)
     return made
+
+
+def from_geometry(doc, g, pl):
+    """A 3D curve with the exact shape of sketch geometry g (sketch placement pl): a line
+    becomes two points, anything else its own B-spline."""
+    if isinstance(g, Part.LineSegment):
+        return create(doc, [pl.multVec(g.StartPoint), pl.multVec(g.EndPoint)], "Curve3D", degree=1)
+    b = g if isinstance(g, Part.BSplineCurve) else g.toBSpline()
+    return create(doc, [pl.multVec(p) for p in b.getPoles()], "Curve3D", closed=b.isPeriodic(), degree=b.Degree,
+                  knots=b.getKnots(), mults=b.getMultiplicities(), weights=b.getWeights())
+
+
+def _uniform(obj):
+    """Adding or removing a point changes the knot count: back to uniform knots."""
+    obj.Knots, obj.Mults, obj.Weights = [], [], []
 
 
 # ---------------------------------------------------------------- editing
@@ -251,7 +282,7 @@ class Editor:
             new, at = (pts[k] + pts[k + 1]) * 0.5, k + 1
         pts.insert(at, new)
         self.selected = at
-        self.change("Add curve point", lambda: setattr(self.obj, "Points", pts))
+        self.change("Add curve point", lambda: (_uniform(self.obj), setattr(self.obj, "Points", pts)))
 
     def remove_point(self):
         pts = list(self.obj.Points)
@@ -261,7 +292,7 @@ class Editor:
         k = len(pts) - 1 if self.selected is None else self.selected
         del pts[k]
         self.selected = None
-        self.change("Remove curve point", lambda: setattr(self.obj, "Points", pts))
+        self.change("Remove curve point", lambda: (_uniform(self.obj), setattr(self.obj, "Points", pts)))
 
     def close(self):
         overlay.remove(self.node)

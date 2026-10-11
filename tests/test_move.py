@@ -60,10 +60,37 @@ class Move(unittest.TestCase):
         self.assertLess((sk.Geometry[1].EndPoint - V(25, 0, 0)).Length, 1e-6)
         self.assertLess((sk.Geometry[1].StartPoint - V(20, 0, 0)).Length, 1e-6)
 
+    def test_sketch_corner_lifts_out_of_the_plane(self):
+        sk = sketch(self.doc, rect(0, 0, 20, 10), constrain=False)
+        corner = next((i, 2) for i, g in enumerate(sk.Geometry) if (g.EndPoint - V(20, 0, 0)).Length < 1e-9)
+        tgt = move.SketchTarget(sk, [corner])
+        tgt.begin(("t", 2))
+        tgt.translate(2, 5)
+        self.assertEqual(len(sk.Geometry), 2)                    # the two lines at that corner left the sketch
+        curves = [c for c, _ in tgt.lifted]
+        self.assertEqual(len(curves), 2)
+        for c in curves:
+            ends = [V(p) for p in c.Points]
+            self.assertTrue(any((p - V(20, 0, 5)).Length < 1e-9 for p in ends), ends)   # the corner, lifted
+            self.assertTrue(any(abs(p.z) < 1e-9 for p in ends), ends)                   # their other ends stay
+        tgt.begin(("t", 0))                                      # later drags keep moving it in 3D
+        tgt.translate(0, 3)
+        self.assertTrue(any((V(p) - V(23, 0, 5)).Length < 1e-9 for p in curves[0].Points))
 
-if __name__ == "__main__":
-    unittest.main()
-
+    def test_an_arc_keeps_its_shape_out_of_the_plane(self):
+        import math as m
+        sk = self.doc.addObject("Sketcher::SketchObject", "A")
+        sk.addGeometry(Part.ArcOfCircle(Part.Circle(V(0, 0, 0), V(0, 0, 1), 10), 0, m.pi / 2))
+        self.doc.recompute()
+        tgt = move.SketchTarget(sk, [(0, 0)])
+        tgt.begin(("t", 2))
+        tgt.translate(2, 4)
+        c = tgt.lifted[0][0]
+        e = c.Shape.Edges[0]
+        for t in (0.2, 0.5, 0.8):
+            q = e.valueAt(e.FirstParameter + t * (e.LastParameter - e.FirstParameter))
+            self.assertAlmostEqual(m.hypot(q.x, q.y), 10, 6)
+            self.assertAlmostEqual(q.z, 4, 9)
 
 class MoveFaceTests(unittest.TestCase):
     def setUp(self):
@@ -112,3 +139,7 @@ class MoveFaceTests(unittest.TestCase):
         for z in (0.2, 9.8):                                            # still open at both ends
             x = 18 + (z - 5) * math.tan(math.radians(20))
             self.assertFalse(b.isInside(V(x, 10, z), 1e-6, False), z)
+
+
+if __name__ == "__main__":
+    unittest.main()

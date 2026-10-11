@@ -138,7 +138,7 @@ class Triad:
             o, d = overlay.ray(it, pos)
             start = overlay.hit_plane(o, d, p, axes[h[1]])
         self.drag = (h, V(p), [V(a) for a in axes], start)
-        self.t.begin()
+        self.t.begin(h)
         self.redraw()
         return True
 
@@ -229,7 +229,7 @@ class BodyTarget:
             fp.Pivot = bodies_centre(fp)
         return effective(fp).multVec(fp.Pivot), WORLD
 
-    def begin(self):
+    def begin(self, handle=None):
         self.start = App.Placement(self.ed.fp.Move)
 
     def translate(self, i, d):
@@ -298,7 +298,7 @@ class FaceTarget(BodyTarget):
         m.Rotation = App.Rotation(self.axes_start[i], ang).multiply(m.Rotation)
         self.ed.set("Move", m)
 
-    def begin(self):
+    def begin(self, handle=None):
         BodyTarget.begin(self)
         self.axes_start = [V(a) for a in self.frame()[1]]
 
@@ -339,9 +339,9 @@ class Session:
     def frame(self):
         return self.target.frame()
 
-    def begin(self):
+    def begin(self, handle=None):
         self.target.doc.openTransaction("Move")
-        self.target.begin()
+        self.target.begin(handle)
 
     def translate(self, i, d):
         self.target.translate(i, d)
@@ -373,7 +373,7 @@ class PlaneTarget:
         r = self.plane.Placement.Rotation
         return self.plane.Placement.Base, [r.multVec(a) for a in WORLD]
 
-    def begin(self):
+    def begin(self, handle=None):
         if self.plane.Mode != "Free":
             self.plane.FreePlacement = self.plane.Placement
             self.plane.Mode = "Free"
@@ -397,11 +397,18 @@ class PlaneTarget:
 
 
 class SketchTarget:
-    """Picked points and lines of a sketch being edited: slide in its plane, turn about its normal."""
+    """Picked points and lines of a sketch being edited. Sliding in the plane or turning about
+    its normal stays in the sketch. The first drag out of the plane (the Z arrow, or turning
+    about X or Y) lifts the picked geometry -- and anything whose end touches a moved point, so
+    corners stay joined -- out of the sketch as 3D curves (exact shapes); from then on the
+    points move freely in 3D."""
+
+    OUT_OF_PLANE = (("t", 2), ("r", 0), ("r", 1))
 
     def __init__(self, sk, picks):
         self.sk, self.doc = sk, sk.Document
         self.picks = picks          # [(geo index, pos)] pos 0 = whole curve, 1/2/3 = start/end/centre
+        self.lifted = None          # [(3D curve, pole indices that move)] once out of the plane
 
     def _points(self):
         out = []
@@ -413,14 +420,73 @@ class SketchTarget:
 
     def frame(self):
         pl = self.sk.getGlobalPlacement()
+        axes = [pl.Rotation.multVec(a) for a in WORLD]
+        if self.lifted is not None:
+            pts = [c.Points[k] for c, idx in self.lifted for k in idx]
+            return (sum(pts, V()) * (1.0 / len(pts)) if pts else pl.Base), axes
         pts = self._points()
         c = sum(pts, V()) * (1.0 / len(pts)) if pts else V()
-        return pl.multVec(c), [pl.Rotation.multVec(a) for a in WORLD]
+        return pl.multVec(c), axes
 
-    def begin(self):
+    def begin(self, handle=None):
+        if self.lifted is None and handle in self.OUT_OF_PLANE:
+            self._lift()
+        if self.lifted is not None:
+            self.start3d = {c.Name: list(c.Points) for c, _ in self.lifted}
+            self.pivot, self.axes = self.frame()
+            return
         self.geo = [g.copy() for g in self.sk.Geometry]
         pl = self.sk.getGlobalPlacement()
         self.centre = pl.inverse().multVec(self.frame()[0])
+
+    # -- lifting out of the sketch --------------------------------------------------
+    def _lift(self):
+        from kovac import curve3d
+        sk, pl = self.sk, self.sk.getGlobalPlacement()
+        geo = sk.Geometry
+        moved = []                                   # sketch-local points that move
+        whole = set()
+        for g, pos in self.picks:
+            if pos in (0, 3):
+                whole.add(g)
+                g0 = geo[g]
+                moved += [p for p in (getattr(g0, "StartPoint", None), getattr(g0, "EndPoint", None)) if p is not None]
+            else:
+                moved.append(sk.getPoint(g, pos))
+        near = lambda a, b: a is not None and (a - b).Length < 1e-6      # noqa: E731
+        affected = sorted(whole | {g for g, _ in self.picks} | {
+            i for i, g0 in enumerate(geo) if not sk.getConstruction(i) and not isinstance(g0, Part.Point)
+            and any(near(getattr(g0, "StartPoint", None), p) or near(getattr(g0, "EndPoint", None), p) for p in moved)})
+        affected = [i for i in affected if not isinstance(geo[i], Part.Point)]
+        if not affected:
+            commands.report("Only lines and curves can leave the sketch plane.")
+            return
+        self.lifted = []
+        for i in affected:
+            c = curve3d.from_geometry(self.doc, geo[i], pl)
+            n = len(c.Points)
+            if i in whole:
+                idx = set(range(n))
+            else:
+                idx = set()
+                for p in moved:
+                    if near(getattr(geo[i], "StartPoint", None), p):
+                        idx.add(0)
+                    if near(getattr(geo[i], "EndPoint", None), p):
+                        idx.add(n - 1)
+            self.lifted.append((c, sorted(idx)))
+        for i in sorted(affected, reverse=True):
+            sk.delGeometry(i)
+        sk.recompute()
+
+    # -- moving -----------------------------------------------------------------
+    def _apply3d(self, m):
+        for c, idx in self.lifted:
+            pts = list(self.start3d[c.Name])
+            for k in idx:
+                pts[k] = m.multVec(pts[k])
+            c.Points = pts
+            c.recompute()
 
     def _apply(self, m):
         geo = [g.copy() for g in self.geo]
@@ -439,9 +505,17 @@ class SketchTarget:
                 3: getattr(geo, "Center", None)}.get(pos) or (V(geo.X, geo.Y, geo.Z) if hasattr(geo, "X") else V())
 
     def translate(self, i, d):
+        if self.lifted is not None:
+            return self._apply3d(App.Placement(self.axes[i] * d, App.Rotation()))
+        if i == 2:
+            return
         self._apply(App.Placement(WORLD[i] * d, App.Rotation()))
 
     def rotate(self, i, ang):
+        if self.lifted is not None:
+            return self._apply3d(App.Placement(V(), App.Rotation(self.axes[i], ang), self.pivot))
+        if i != 2:
+            return
         self._apply(App.Placement(V(), App.Rotation(V(0, 0, 1), ang), self.centre))
 
 
@@ -491,7 +565,7 @@ def command():
         if not picks:
             commands.report("Select the points or lines to move first.")
             return
-        return _start(SketchTarget(sk, picks), "Move sketch elements", translations=(0, 1), rotations=(2,))
+        return _start(SketchTarget(sk, picks), "Move sketch elements")
     sel = Gui.Selection.getSelectionEx("", 0)
     for s in sel:
         if type(getattr(s.Object, "Proxy", None)).__name__ == "DatumPlane" and not getattr(s.Object, "Auto", False):
