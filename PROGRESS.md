@@ -105,6 +105,7 @@ A batch of fixes and small features from the owner's own testing, worked item by
 | "Group selected" in the timeline did set one shared group on every picked feature -- correctly, checked directly -- but every member showed only a bare "▾", identical whichever group it was in or whether it was grouped at all, reading as "each on its own" rather than "these belong together" | fixed: every member now names its group and shares a tint, so the group reads as one row of things even without collapsing it |
 | Selecting a face only shaded that one face, not the body it belongs to | fixed: a translucent wash over the whole selected shape (`overlay.shape_node`, a selection observer in `navigation.py`), under FreeCAD's own crisper per-face highlight, not replacing it |
 | Sketch Offset ("in sketch mode, offset does not work") | investigated at length (single edge, closed 4-edge profile, both through a real simulated click reaching FreeCAD's own tool, not a shortcut) -- works correctly both times; could not reproduce a defect |
+| A brand-new feature that failed outright (OK clicked on something already broken) stayed in the history forever, same as one broken later by an upstream change | fixed: OK on a *new*, already-failed feature now discards it, same as Cancel; editing an *existing* feature into failure still keeps it, Status set, shown red -- that part already worked |
 
 ## Next
 Milestone 3 — drawings, in the same look and logic.

@@ -131,6 +131,11 @@ def face_point(shape, normal):
     raise RuntimeError("no face with normal %s" % normal)
 
 
+def ok_button():
+    from kovac import editor
+    return [b for b in editor.current().findChildren(QtWidgets.QPushButton) if b.text() == "OK"][0]
+
+
 # ------------------------------------------------------------------ scenario
 def scenario():
     from kovac import commands, measure, navigation, radial, search, shell, views
@@ -427,6 +432,42 @@ def scenario():
         yield 50
     check("STEP import is one undo step", len([o for o in doc.Objects if hasattr(o, "Shape")]) == 0, [o.Name for o in doc.Objects])
     doc.redo()
+    yield 200
+
+    # -- OK on a brand-new, already-broken feature discards it; on a broken *edit* keeps it --
+    import Part
+    from kovac import features
+    sk2 = doc.addObject("Sketcher::SketchObject", "FailSketch")
+    pts = [V(0, 0, 0), V(10, 0, 0), V(10, 10, 0), V(0, 10, 0)]
+    for i in range(4):
+        sk2.addGeometry(Part.LineSegment(pts[i], pts[(i + 1) % 4]))
+    doc.recompute()
+    before_new = set(doc.Objects)
+    ed_new = editor.start(features.Extrude, Profile=sk2, Length=0)     # zero distance: fails outright
+    yield 150
+    status_new = ed_new.fp.Status
+    ok_button().click()
+    yield 200
+    check("a brand-new feature that fails outright is discarded on OK, not left broken",
+          bool(status_new) and set(doc.Objects) == before_new | {sk2}, (status_new, [o.Name for o in doc.Objects]))
+    ed_good = editor.start(features.Extrude, Profile=sk2, Length=5)
+    yield 150
+    ok_button().click()
+    yield 200
+    ex2 = doc.getObject(ed_good.fp.Name)
+    ed_edit = editor.edit(ex2)
+    yield 150
+    ed_edit.set("Length", 0)                                          # breaks it by editing, not creating
+    yield 150
+    status_edit = ed_edit.fp.Status
+    ok_button().click()
+    yield 200
+    check("a feature broken by editing it stays in the history, with its status set",
+          bool(status_edit) and doc.getObject(ex2.Name) is not None and doc.getObject(ex2.Name).Status == status_edit,
+          (status_edit, doc.getObject(ex2.Name)))
+    doc.removeObject(ex2.Name)
+    doc.removeObject(sk2.Name)
+    doc.recompute()
     yield 200
 
     # -- modes keep the model ------------------------------------------------------------

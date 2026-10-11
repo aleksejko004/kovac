@@ -767,6 +767,12 @@ class Editor(QtWidgets.QWidget):
             return
         self.hide_consumed()
         model.commit(self.doc)
+        if self.new and self.fp.Status:
+            # a brand new feature that failed outright has nothing worth keeping -- same as
+            # Cancel, not left behind broken. An *edit* that breaks a feature still commits
+            # (reject() below): it's not new, and the history after it may depend on its tip.
+            self.reject()
+            return
         if self.doc.HasPendingTransaction:
             self.doc.commitTransaction()
         self.close_panel()
