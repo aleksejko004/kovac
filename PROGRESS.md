@@ -118,6 +118,7 @@ The owner tested round 1 and reported several items still not right, plus one ne
 | Item | State |
 |---|---|
 | Round 1's grid-clipping fix (`_clip_for`) sized both near and far planes from one bounding sphere around model *and* grid together -- a far-off grid corner could inflate that sphere enough to push the *near* plane past the model itself, slicing it off (seen live in the owner's own screenshot) | fixed: near and far are measured separately, each bounding-box corner's depth along the camera's own view direction (not a sphere radius) -- near from the model's corners alone, far from model-and-grid corners together. Checked against a small object positioned well away from the origin (the owner's own reproduction hint) at both close and far zoom, including FreeCAD's own orthographic "fit all" occasionally placing the camera essentially on the model's own bounding-box corner for a small object -- even there the residual overlap is the clamp floor itself (a thousandth of a millimetre), not a visible clip |
+| "Better but not perfect" on the grid's edge, suggested changing opacity instead of a hard cutoff | the grid already faded, but toward one flat colour approximating the viewport's own top-to-bottom gradient background -- a visible seam wherever that average didn't match the real gradient behind it, worst at a shallow tilt. Switched to real transparency (`SoMaterial`, per-vertex, fading to fully transparent at the edge) so it matches whatever is actually behind it, gradient included |
 
 ## Next
 Milestone 3 — drawings, in the same look and logic.

@@ -118,18 +118,29 @@ def _skip_bounds_group():
 
 
 def _lines(root, polylines, width, pattern=0xFFFF):
-    """Polylines of [(point, hex colour), ...]; the colour blends along each one."""
+    """Polylines of [(point, hex colour[, alpha]), ...]; colour and opacity both blend along
+    each one. Real transparency, not a fade toward an approximate flat background colour: the
+    actual background is a top-to-bottom gradient (`palette.py`), so mixing toward one flat
+    averaged colour left a seam wherever the grid's own fade crossed a part of the screen the
+    average didn't match -- most visible at a shallow tilt, where the grid's fade band can span
+    much of the screen's own vertical gradient at once. SoMaterial (not SoBaseColor, which has
+    no alpha) with transparency bound PER_VERTEX alongside colour fades to nothing against
+    whatever is actually behind it."""
     from pivy import coin
     polylines = [pl for pl in polylines if len(pl) > 1]
     if not polylines:
         return
     sep = coin.SoSeparator()
-    pts = [q for pl in polylines for q, _ in pl]
-    cols = [tuple(c / 255.0 for c in palette.rgb(h)) for pl in polylines for _, h in pl]
-    col = coin.SoBaseColor()
-    col.rgb.setValues(0, len(cols), cols)
+    pts = [q for pl in polylines for q, *_ in pl]
+    cols = [tuple(c / 255.0 for c in palette.rgb(h)) for pl in polylines for _, h, *_ in pl]
+    alphas = [(a[0] if a else 1.0) for pl in polylines for _, h, *a in pl]
+    mat = coin.SoMaterial()
+    mat.diffuseColor.setValues(0, len(cols), cols)
+    mat.transparency.setValues(0, len(alphas), [1.0 - a for a in alphas])
     bind = coin.SoMaterialBinding()
     bind.value = coin.SoMaterialBinding.PER_VERTEX
+    light = coin.SoLightModel()
+    light.model = coin.SoLightModel.BASE_COLOR
     style = coin.SoDrawStyle()
     style.lineWidth = width
     style.linePattern = pattern
@@ -137,7 +148,7 @@ def _lines(root, polylines, width, pattern=0xFFFF):
     crd.point.setValues(0, len(pts), [list(q) for q in pts])
     lines = coin.SoLineSet()
     lines.numVertices.setValues(0, len(polylines), [len(pl) for pl in polylines])
-    for node in (col, bind, style, crd, lines):
+    for node in (mat, bind, light, style, crd, lines):
         sep.addChild(node)
     root.addChild(sep)
 
@@ -168,7 +179,6 @@ def _build(view, s, half, centre=(0.0, 0.0)):
     five steps and their letter; a short Z axis."""
     from pivy import coin
     t = palette.theme(kovac.theme_name())
-    bg = palette.mix(t["viewport_top"], t["viewport_bottom"], 0.5)
     outer = _skip_bounds_group()          # a plain group: keep our unlit, unpickable state inside a separator
     root = coin.SoSeparator()
     outer.addChild(root)
@@ -184,15 +194,21 @@ def _build(view, s, half, centre=(0.0, 0.0)):
     root.addChild(light)
 
     def shade(colour, x, y):
+        """(colour, opacity): real transparency, faded to nothing by the edge, not a fade
+        toward an approximate flat background -- the viewport is a top-to-bottom gradient
+        (`palette.py`), and a fade toward one flat averaged colour left a visible seam
+        wherever its own gradient didn't match that average, most noticeable at a shallow
+        tilt where the fade band can span much of the screen's own gradient at once."""
         r = max(abs(x - cx), abs(y - cy)) / half
-        return palette.mix(bg, colour, min(1.0, max(0.0, (1 - r) / (1 - FADE))))
+        return colour, min(1.0, max(0.0, (1 - r) / (1 - FADE)))
 
     def faded(colour, a, b, steps=(0.0, FADE, 1.0)):
         """Polyline from a to b with the fade applied at each stop."""
         out = []
         for k in steps:
             q = tuple(x + (y - x) * k for x, y in zip(a, b))
-            out.append((q, shade(colour, q[0], q[1])))
+            c, alpha = shade(colour, q[0], q[1])
+            out.append((q, c, alpha))
         return out
     n = int(round(half / s))
     i0, j0 = int(round(cx / s)), int(round(cy / s))
@@ -223,7 +239,7 @@ def _build(view, s, half, centre=(0.0, 0.0)):
         on_axis = lambda u: tuple(u * k for k in d)  # noqa: E731
 
         def seg(u0, u1):
-            return [(on_axis(u), shade(col, *on_axis(u)[:2])) for u in (u0, (u0 + u1) / 2, u1)] if u1 > u0 else []
+            return [(on_axis(u), *shade(col, *on_axis(u)[:2])) for u in (u0, (u0 + u1) / 2, u1)] if u1 > u0 else []
         _lines(root, [seg(max(lo, 0), hi)], 2.4)                       # positive side solid
         _lines(root, [seg(lo, min(hi, 0))], 1.6, 0x0F0F)              # negative side dashed
         ticks = []
