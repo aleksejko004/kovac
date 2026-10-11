@@ -742,6 +742,7 @@ class Editor(QtWidgets.QWidget):
 
     def close_panel(self):
         global _current
+        self.closing = True
         Gui.Selection.removeObserver(self)
         for r in self.rows:
             if isinstance(r, QtGui.QShortcut):
@@ -838,6 +839,19 @@ def close_current():
         _current.reject() if _current.new else _current.accept()
 
 
+class _CloseIsCancel(QtCore.QObject):
+    """The panel window's own close button means Cancel, not "leave the feature half-made"."""
+
+    def __init__(self, ed, parent):
+        super().__init__(parent)
+        self.ed = ed
+
+    def eventFilter(self, _o, ev):
+        if ev.type() == QtCore.QEvent.Close and not getattr(self.ed, "closing", False):
+            QtCore.QTimer.singleShot(0, self.ed.reject)
+        return False
+
+
 def open_editor(fp, new):
     """Show the panel for fp (inside a transaction the caller opened)."""
     global _current
@@ -847,6 +861,7 @@ def open_editor(fp, new):
     d = panel.dock("Editor", title, ed, floating=True)
     d.setWindowTitle(title)
     d.setWidget(ed)
+    d.installEventFilter(_CloseIsCancel(ed, d))
     d.show()
     d.raise_()
     _current = ed
@@ -856,6 +871,17 @@ def open_editor(fp, new):
     return ed
 
 
+def _open_transaction(doc, name):
+    """The panel's own undo step, kept open until OK or Cancel. FreeCAD runs every toolbar
+    click and shortcut inside an automatic transaction that it commits as the command returns;
+    a plain openTransaction() inside that only renames it, so the panel's step was committed
+    the moment the panel opened and Cancel had nothing left to undo -- the feature stayed. The
+    second call, now that the step carries our name, asks for it to persist past the command
+    (outside a command it simply opens a fresh, still-empty step: nothing has changed yet)."""
+    for _ in range(2):
+        App.setActiveTransaction(name, True)
+
+
 def start(proxy, name=None, **props):
     """Create a feature at the rollback marker and open its panel (one transaction)."""
     close_current()
@@ -863,7 +889,7 @@ def start(proxy, name=None, **props):
     if doc is None:
         from kovac import startpage
         doc = startpage.new_design()
-    doc.openTransaction(proxy.kind)
+    _open_transaction(doc, proxy.kind)
     fp = model.create(doc, proxy, name, **props)
     return open_editor(fp, True)
 
@@ -877,7 +903,7 @@ def edit(fp):
     if fp in its and its.index(fp) + 1 < before:
         model.set_rollback(doc, its.index(fp) + 1)
         model.commit(doc)
-    doc.openTransaction("Edit " + fp.Label)
+    _open_transaction(doc, "Edit " + fp.Label)
     ed = open_editor(fp, False)
     ed.rollback_before = before if fp in its and its.index(fp) + 1 < before else None
     return ed
