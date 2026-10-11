@@ -66,7 +66,7 @@ def create():
 
     from kovac import commands, model, overlay, palette, panel
 
-    OBJ, MARK = QtCore.Qt.UserRole, QtCore.Qt.UserRole + 1
+    OBJ, MARK, GROUP = QtCore.Qt.UserRole, QtCore.Qt.UserRole + 1, QtCore.Qt.UserRole + 2
 
     def marker_icon():
         pm = QtGui.QPixmap(6, 30)
@@ -138,6 +138,14 @@ def create():
             d = it.data(OBJ) if it else None
             return App.getDocument(d[0]).getObject(d[1]) if d else None
 
+        def members(self, it):
+            """The features an item stands for: a group's own item stands for all of them."""
+            g = it.data(GROUP)
+            if g:
+                return [x for x in features(App.ActiveDocument) if getattr(x, "TimelineGroup", "") == g]
+            o = self.obj(it)
+            return [o] if o is not None else []
+
         def _items(self):
             return [self.list.item(i) for i in range(self.list.count())]
 
@@ -158,26 +166,27 @@ def create():
             hist = model.items(doc)
             marker_at = model.rollback_index(doc)
             marker_done, groups = False, set()
+            tint = QtGui.QColor(palette.mix(t["viewport_bottom"], palette.accent(), 0.12))
             for o in features(doc):
                 if hist and o in hist and hist.index(o) >= marker_at and not marker_done:
                     self._add_marker()
                     marker_done = True
                 g = getattr(o, "TimelineGroup", "")
+                if g and g not in groups:     # one item for the whole group: closed, or a header in front of its members
+                    groups.add(g)
+                    closed = g in self.collapsed
+                    n = sum(1 for x in features(doc) if getattr(x, "TimelineGroup", "") == g)
+                    it = QtWidgets.QListWidgetItem(QtGui.QIcon(kovac.icon("folder")), ("▸ %s (%d)" if closed else "▾ %s") % ((g, n) if closed else (g,)))
+                    it.setToolTip("Group %s, %d features (double-click to %s)" % (g, n, "open" if closed else "close"))
+                    it.setData(OBJ, (o.Document.Name, o.Name))
+                    it.setData(GROUP, g)
+                    it.setBackground(tint)
+                    self.list.addItem(it)
                 if g and g in self.collapsed:
-                    if g not in groups:
-                        groups.add(g)
-                        it = QtWidgets.QListWidgetItem("▸ " + g)
-                        it.setToolTip("Group %s (double-click to open)" % g)
-                        it.setData(OBJ, (o.Document.Name, o.Name))
-                        self.list.addItem(it)
                     continue
                 vo = getattr(o, "ViewObject", None)
                 icon = QtGui.QIcon(kovac.icon("sketch")) if o.TypeId.startswith("Sketcher::") else (vo.Icon if vo else QtGui.QIcon())
-                # Named, not just "▾": a bare arrow on every member of every group looks the
-                # same whichever group it is, or even that it's grouped at all rather than each
-                # one just happening to have its own little arrow -- the name on every member
-                # (not only the first) reads as one thing even scrolled to the middle of it.
-                it = QtWidgets.QListWidgetItem(icon, ("▾ " + g) if g else "")
+                it = QtWidgets.QListWidgetItem(icon, "")
                 st = state(o)
                 active = not hist or o not in hist or hist.index(o) < marker_at
                 tip = o.Label + ("" if st == "ok" else "  —  " + (getattr(o, "Status", "") or st))
@@ -190,8 +199,8 @@ def create():
                 elif not active:
                     it.setForeground(QtGui.QColor(t["text_muted"]))
                     it.setBackground(QtGui.QColor(t["surface2"]))
-                elif g:         # a faint, shared tint so the group's members read as one row of things
-                    it.setBackground(QtGui.QColor(palette.mix(t["viewport_bottom"], palette.accent(), 0.12)))
+                elif g:         # the header's tint runs on through its members
+                    it.setBackground(tint)
                 self.list.addItem(it)
             if hist and not marker_done:
                 self._add_marker()
@@ -255,11 +264,12 @@ def create():
         def double(self, it):
             if it.data(MARK):
                 return
-            o = self.obj(it)
-            if it.text().startswith("▸"):
-                self.collapsed.discard(getattr(o, "TimelineGroup", ""))
+            g = it.data(GROUP)
+            if g:
+                self.collapsed.symmetric_difference_update({g})
                 self.rebuild()
                 return
+            o = self.obj(it)
             self.edit(o)
 
         @staticmethod
@@ -288,12 +298,15 @@ def create():
                 m.addAction("Move later", lambda: self.run("Reorder", lambda: model.move(doc, o, hist.index(o) + 1)))
             m.addAction("Rename…", lambda: self.rename(o))
             m.addAction("Show dependencies", lambda: self.dependencies(o))
-            sel = [self.obj(x) for x in self.list.selectedItems() if not x.data(MARK)]
+            sel = list(dict.fromkeys(m for x in self.list.selectedItems() if not x.data(MARK) for m in self.members(x)))
             if len(sel) > 1:
                 m.addAction("Group selected", lambda: self.group(sel))
             g = getattr(o, "TimelineGroup", "")
             if g:
-                m.addAction("Collapse group", lambda: (self.collapsed.add(g), self.rebuild()))
+                if g in self.collapsed:
+                    m.addAction("Open group", lambda: (self.collapsed.discard(g), self.rebuild()))
+                else:
+                    m.addAction("Close group", lambda: (self.collapsed.add(g), self.rebuild()))
                 m.addAction("Ungroup", lambda: self.group([x for x in features(doc) if getattr(x, "TimelineGroup", "") == g], ""))
             m.addSeparator()
             if len(sel) > 1:
@@ -313,8 +326,8 @@ def create():
             for it in self.list.selectedItems():
                 if it.data(MARK):
                     continue
-                if it.text().startswith("▸"):               # a collapsed group row: every member
-                    g = getattr(self.obj(it), "TimelineGroup", "")
+                if it.data(GROUP):                         # a group's own item: every member
+                    g = it.data(GROUP)
                     objs += [x for x in features(doc) if getattr(x, "TimelineGroup", "") == g]
                 else:
                     o = self.obj(it)
@@ -360,6 +373,8 @@ def create():
                     if not hasattr(x, "TimelineGroup"):
                         x.addProperty("App::PropertyString", "TimelineGroup", "Kovac", "timeline group", 4)
                     x.TimelineGroup = name
+            if name:
+                self.collapsed.add(name)      # a new group shows as the one item it now is
             self.run("Group", apply)
 
         def dependencies(self, o):

@@ -18,6 +18,7 @@ import FreeCAD as App
 import FreeCADGui as Gui
 import Part
 from PySide import QtCore, QtGui, QtWidgets
+from PySide6 import QtTest     # FreeCAD's PySide shim has no QtTest; real key clicks go through the shortcut map
 
 V = App.Vector
 OUT = os.environ["KOVAC_RESULT"]
@@ -55,6 +56,13 @@ def view():
 
 def vp():
     return view().graphicsView().viewport()
+
+
+def click_widget(w, pos, mods=QtCore.Qt.NoModifier):
+    """A left click delivered to a widget the way Qt hands it one (press, release)."""
+    for t, held in ((QtCore.QEvent.MouseButtonPress, QtCore.Qt.LeftButton), (QtCore.QEvent.MouseButtonRelease, QtCore.Qt.NoButton)):
+        QtWidgets.QApplication.sendEvent(w, QtGui.QMouseEvent(t, QtCore.QPointF(pos), QtCore.QPointF(w.mapToGlobal(pos)),
+                                                              QtCore.Qt.LeftButton, held, mods))
 
 
 def to_qt(p):
@@ -254,6 +262,20 @@ def scenario():
           want <= set(acts) and len(acts) >= 52 and len(ribbon_buttons) >= 30 and not hidden,
           ("window %d px, screen %d px" % (mw.width(), mw.screen().availableGeometry().width()),
            len(acts), len(ribbon_buttons), hidden, sorted(want - set(acts))))
+    # sketches stay in Kovač, so FreeCAD never built the sketcher's own actions and never
+    # registered its default keys: every tooltip came out without one, and the keys did nothing
+    no_key = sorted({a.objectName() for a in acts.values()
+                     if "(" not in a.toolTip().split("\n")[0] and a.objectName() not in ("Sketcher_ConstrainSymmetric",)})
+    check("every sketch tool's tooltip names its shortcut", not no_key, no_key)
+    fired = []
+    line_act = acts["Sketcher_CreateLine"]
+    line_act.triggered.connect(lambda *_: fired.append(1))
+    vp().setFocus()
+    QtTest.QTest.keyClick(vp(), QtCore.Qt.Key_G)
+    QtTest.QTest.keyClick(vp(), QtCore.Qt.Key_L)
+    yield 300
+    check("typing a sketch tool's shortcut (G, L) starts it", bool(fired))
+    QtTest.QTest.keyClick(vp(), QtCore.Qt.Key_Escape)
     yield 400                                 # the task panel watcher runs every 300 ms
     tasks = mw.findChild(QtWidgets.QDockWidget, "Tasks")
     check("the sketcher's task panel stays closed", tasks is None or not tasks.isVisible())
@@ -774,11 +796,20 @@ def scenario():
     check("three bodies added for the group-select tests", len(bodies()) == before_bodies + 3, len(bodies()))
 
     # browser: multi-select two bodies, Delete key removes both as one undo step
+    # -- picked with real clicks (Ctrl for the second): setSelected() alone once hid that no row
+    # could be selected by mouse at all
     tree.clearSelection()
     body_items = [it for it in tree.walk() if tree.obj(it) is not None and hasattr(tree.obj(it), "BodyId")]
-    for it in body_items[-2:]:
-        it.setSelected(True)
-    yield 100
+    for k, it in enumerate(body_items[-2:]):
+        tree.scrollToItem(it)
+        r = tree.visualItemRect(it)
+        click_widget(tree.viewport(), QtCore.QPoint(r.left() + 30, r.center().y()),
+                     QtCore.Qt.ControlModifier if k else QtCore.Qt.NoModifier)
+        yield 80
+    picked = {s.Object.Name for s in Gui.Selection.getSelectionEx("*", 0)}
+    check("browser: click then Ctrl+click selects both bodies, here and in the 3D view",
+          len(tree.selectedItems()) == 2 and picked == {tree.obj(it).Name for it in body_items[-2:]},
+          ([x.text(0) for x in tree.selectedItems()], sorted(picked)))
     QtWidgets.QApplication.sendEvent(tree, QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Delete, QtCore.Qt.NoModifier))
     yield 200
     after_browser_delete = len(bodies())
@@ -806,18 +837,35 @@ def scenario():
     check("timeline: Delete key removes every selected feature, one undo step",
           after_feats == before_feats - 2, (before_feats, after_feats))
 
-    # grouping: every member names the group and shares a background, not just a bare "▾"
+    # grouping: picked with real Ctrl+clicks, the group shows as one item -- not one labelled
+    # item per member, which read as "each feature is its own group"
+    GROUP = QtCore.Qt.UserRole + 2
     feat_items = [it for it in [tl.list.item(i) for i in range(tl.list.count())] if not it.data(QtCore.Qt.UserRole + 1)]
-    to_group = [tl.obj(it) for it in feat_items[-2:]]
-    tl.group(to_group, "SideBodies")
+    tl.list.clearSelection()
+    for k, it in enumerate(feat_items[-2:]):
+        click_widget(tl.list.viewport(), tl.list.visualItemRect(it).center(),
+                     QtCore.Qt.ControlModifier if k else QtCore.Qt.NoModifier)
+        yield 120
+    picked = [tl.obj(it) for it in tl.list.selectedItems()]
+    check("timeline: Ctrl+click picks several features", len(picked) == 2, [o.Label for o in picked if o])
+    tl.group(picked, "SideBodies")
     yield 150
     rows = [tl.list.item(i) for i in range(tl.list.count())]
-    grouped_rows = [it for it in rows if "SideBodies" in it.text()]
-    tints = {it.background().color().name() for it in grouped_rows}
-    check("grouped items name the group and share a background, instead of looking separate",
-          len(grouped_rows) == 2 and len(tints) == 1 and list(tints)[0] != "#000000",
-          ([it.text() for it in grouped_rows], tints))
-
+    heads = [it for it in rows if it.data(GROUP) == "SideBodies"]
+    check("a new group shows as one item standing for all its members",
+          len(heads) == 1 and "(2)" in heads[0].text() and len(rows) == len(feat_items) - 2 + 1 + 1,   # + the rollback marker
+          ([it.text() for it in rows], len(feat_items)))
+    tl.double(heads[0])
+    yield 150
+    rows = [tl.list.item(i) for i in range(tl.list.count())]
+    heads = [k for k, it in enumerate(rows) if it.data(GROUP) == "SideBodies"]
+    members = [it for it in rows if tl.obj(it) in picked and not it.data(GROUP)]
+    tints = {it.background().color().name() for it in members + [rows[heads[0]]]} if heads else set()
+    check("opened, the group is one header in front of its members, sharing its tint",
+          len(heads) == 1 and len(members) == 2 and len(tints) == 1 and all(not it.text() for it in members),
+          ([it.text() for it in rows], tints))
+    App.ActiveDocument.undo()
+    yield 150
 
 def run(gen):
     try:
