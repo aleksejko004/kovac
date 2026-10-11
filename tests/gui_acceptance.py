@@ -306,10 +306,11 @@ def scenario():
         reach = max(it.vp.width(), it.vp.height()) * it.px_size()
         half = min(math.ceil(max(s * 30, reach * 1.6) / (5 * s)) * 5 * s, s * 400)
         pos = V(*view().getCameraNode().position.getValue().getValue())
-        corner_dist = max((pos - V(cx + sx * half, cy + sy * half, 0)).Length for sx in (-1, 1) for sy in (-1, 1))
+        fwd = V(*view().getViewDirection()).normalize()    # the far plane bounds *depth*, not straight-line distance
+        corner_depth = max((V(cx + sx * half, cy + sy * half, 0) - pos).dot(fwd) for sx in (-1, 1) for sy in (-1, 1))
         far = view().getCameraNode().farDistance.getValue()
-        if far < corner_dist - 1e-6:
-            short_clip.append((elev, round(far, 1), round(corner_dist, 1)))
+        if far < corner_depth - 1e-6:
+            short_clip.append((elev, round(far, 1), round(corner_depth, 1)))
     check("ground grid is never clipped away by the camera's far plane, at any tilt", not short_clip, short_clip)
     views.go(view(), views.view_rotation(views.ISO), fit=True)
     yield 400

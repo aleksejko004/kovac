@@ -276,21 +276,35 @@ def refresh(force=False):
     _state["step"], _state["view"], _state["centre"] = s, view, c
 
 
-def _clip_for(it, centre, half):
-    """Push the near/far clip planes out to cover the grid, not just the model.
+def _corners(box):
+    return [V(x, y, z) for x in (box.XMin, box.XMax) for y in (box.YMin, box.YMax) for z in (box.ZMin, box.ZMax)]
 
-    The grid sits in a SoSkipBoundingGroup (EXCLUDE_BBOX) so 'fit all' never zooms out to
-    show it -- but Coin's automatic near/far clipping (Gui::View3DInventorViewer runs it every
+
+def _clip_for(it, centre, half):
+    """Push the far clip plane out to cover the grid, not just the model; the near plane stays
+    sized to the model alone.
+
+    The grid sits in a SoSkipBoundingGroup (EXCLUDE_BBOX) so 'fit all' never zooms out to show
+    it -- but Coin's automatic near/far clipping (Gui::View3DInventorViewer runs it every
     frame, strategy BOUNDING_BOX by default) walks the very same scene bounding box, so it
     never saw the grid either. It then clips the far plane right at the model's edge; at some
     camera tilts that clip plane crosses the ground close to the camera, and the grid vanishes
     beyond it, with the cut line's position and angle on screen changing with the view. We take
-    over clipping while the grid is on: auto-clipping off, near/far sized from the camera to a
-    sphere around the model and the grid's own footprint, each tick.
+    over clipping while the grid is on: auto-clipping off, near/far set from the camera's own
+    view direction, each tick.
+
+    A first version sized both planes from one bounding sphere around model and grid together
+    -- wrong, because a far-off grid corner inflates that sphere's radius enough to push the
+    *near* plane out past the model itself, slicing it (seen live, not assumed: a screenshot
+    showed a model with its near side sheared off). Near and far are different problems: near
+    must stay tight to the model alone, far has to reach the grid. Measuring the depth of each
+    bounding-box corner along the camera's own view direction, not a sphere radius, keeps them
+    properly separate -- near is the closest model corner, regardless of where the grid's are.
     Keyed by the cached Interactor, not the view: FreeCAD can hand back a fresh Python wrapper
     for the same view on each Gui.activeView() call (navigation.install() exists for the same
     reason), so the view object itself is not a safe dict key across calls."""
     from pivy import coin
+    from kovac import navigation
     view = it.view
     rm = view.getViewer().getSoRenderManager()
     if it not in _clip_saved:
@@ -298,22 +312,23 @@ def _clip_for(it, centre, half):
     rm.setAutoClipping(coin.SoRenderManager.NO_AUTO_CLIPPING)
     cam = view.getCameraNode()
     pos = V(*cam.position.getValue().getValue())
-    box = App.BoundBox()
+    forward = navigation.camera_focus(cam) - pos
+    forward = forward.normalize() if forward.Length > 1e-9 else V(0, 0, -1)
+    model_box = App.BoundBox()
     doc = App.ActiveDocument
     for o in doc.Objects if doc else []:
         vo = getattr(o, "ViewObject", None)
         shape = getattr(o, "Shape", None)
         if vo is not None and vo.Visibility and shape is not None and not shape.isNull():
-            box.add(shape.BoundBox)
+            model_box.add(shape.BoundBox)
     cx, cy = centre
-    for x in (cx - half, cx + half):
-        for y in (cy - half, cy + half):
-            box.add(V(x, y, 0))
-    if not box.isValid():
-        box.add(pos)
-    radius = (V(box.XMax, box.YMax, box.ZMax) - box.Center).Length
-    d = (pos - box.Center).Length
-    near, far = max(d - radius, 1e-3), d + radius
+    grid_corners = [V(x, y, 0) for x in (cx - half, cx + half) for y in (cy - half, cy + half)]
+    model_corners = _corners(model_box) if model_box.isValid() else [pos + forward]
+    near = min((c - pos).dot(forward) for c in model_corners)
+    far = max((c - pos).dot(forward) for c in model_corners + grid_corners)
+    model_size = model_box.DiagonalLength if model_box.isValid() else 0.0
+    margin = max(model_size, half) * 0.02 + 1e-3    # a hair of slack either side
+    near, far = max(near - margin, 1e-3), far + margin
     if far <= near:
         far = near + 1.0
     cam.nearDistance.setValue(near)

@@ -111,5 +111,13 @@ A batch of fixes and small features from the owner's own testing, worked item by
 | Pattern along a curve; 3D curves | added as one feature (Pattern's third Type, "Path"): evenly spaced along a sketch curve *or* picked 3D edges -- the same dual path input Sweep already has -- with instances rotated to follow the local tangent when Align is set. This is my own reading of "allow for 3D curves" given its place in the list right after "pattern on curve"; flagged in case a different, dedicated 3D-curve capability was meant instead |
 | Fillet and Chamfer "need grab arrows like in Fusion" | added a drag arrow for the default value (Fillet's Radius, Chamfer's Distance), at the first picked edge's midpoint, outward along the bisector of its two adjacent faces -- the same arrow-plus-floating-field manipulator Extrude and Face Pull already use, now in `manip.ARROWS`. Scoped to the one shared value per group, not a separate handle at every point along an edge for a continuously *variable* radius along its length -- that's a materially bigger feature (a different OCCT fillet API entirely, per-point radius storage, one handle per point) and still not built; this is the everyday case the request names, not full Fusion parity |
 
+## Bug-fix pass, round 2 (owner re-test, 2026-10-11)
+
+The owner tested round 1 and reported several items still not right, plus one new regression. Worked item by item against that feedback.
+
+| Item | State |
+|---|---|
+| Round 1's grid-clipping fix (`_clip_for`) sized both near and far planes from one bounding sphere around model *and* grid together -- a far-off grid corner could inflate that sphere enough to push the *near* plane past the model itself, slicing it off (seen live in the owner's own screenshot) | fixed: near and far are measured separately, each bounding-box corner's depth along the camera's own view direction (not a sphere radius) -- near from the model's corners alone, far from model-and-grid corners together. Checked against a small object positioned well away from the origin (the owner's own reproduction hint) at both close and far zoom, including FreeCAD's own orthographic "fit all" occasionally placing the camera essentially on the model's own bounding-box corner for a small object -- even there the residual overlap is the clamp floor itself (a thousandth of a millimetre), not a visible clip |
+
 ## Next
 Milestone 3 — drawings, in the same look and logic.
