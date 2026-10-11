@@ -535,11 +535,14 @@ def apply_visibility():
 
 def _sync_tasks():
     """FreeCAD's task panel shows only while one of its dialogs is open.
-    ponytail: polled every 300 ms; a task-watcher hook would be exact if this ever lags."""
+    Polled every 300 ms, and re-checked on the next event-loop turn whenever FreeCAD shows it."""
     tasks = Gui.getMainWindow().findChild(QtWidgets.QDockWidget, "Tasks")
     from kovac import sketchmode
     if tasks is not None and not advanced():
         tasks.setVisible(Gui.Control.activeDialog() and not sketchmode.in_sketch())
+        if not tasks.property("kovacSynced"):
+            tasks.setProperty("kovacSynced", True)
+            tasks.visibilityChanged.connect(lambda shown: shown and QtCore.QTimer.singleShot(0, _sync_tasks))
     from kovac import sketchtools
     sketchtools.poll()
     bar = Gui.getMainWindow().findChild(QtWidgets.QToolBar, "kovacSketchBar")
@@ -562,7 +565,7 @@ class AutoRecompute:
         self.timer.timeout.connect(self.run)
         App.addDocumentObserver(self)
 
-    def slotChangedObject(self, obj, _prop):
+    def slotChangedObject(self, *_):     # (obj, prop); undo/redo pass (doc)
         self.timer.start()
 
     slotUndoDocument = slotRedoDocument = slotChangedObject

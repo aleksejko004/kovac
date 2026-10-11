@@ -224,6 +224,7 @@ def scenario():
     Gui.Selection.clearPreselection()
     shot("03_measure")
     Gui.Selection.clearSelection()
+    yield 100
 
     # -- no stock workbench UI ------------------------------------------------------------
     stray_bars = [t.objectName() for t in mw.findChildren(QtWidgets.QToolBar) if t.isVisible() and not t.objectName().startswith("kovac")]

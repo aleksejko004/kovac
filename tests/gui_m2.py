@@ -196,6 +196,9 @@ def scenario():
     from kovac import commands, editor, model, navigation, params, sketchmode, views
     mw = Gui.getMainWindow()
     mw.showMaximized()
+    if mw.screen().availableGeometry().width() < 1700:     # CI screens: the ribbon is laid out for 1700 px
+        mw.showNormal()
+        mw.setGeometry(0, 30, 1920, 1050)
     yield 600
     commands.run("Kovac_NewDesign")
     yield 400
