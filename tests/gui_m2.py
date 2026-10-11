@@ -709,6 +709,41 @@ def scenario():
     check("Delete removes a selected body; undo brings it back", gone and len(bodies()) == 1, (gone, len(bodies())))
     shot("05_benchmark_part")
 
+    # Opening a second feature panel while a first one is still open (unclosed, not OK'd or
+    # Cancelled) used to crash: the new panel's Cancel could abort the transaction the first
+    # panel's own feature was just created under, deleting it out from under its own open
+    # panel (editor.py's close_current(), run before, not after, the new one starts).
+    from kovac import editor
+
+    def side_rect(name, x0):
+        s = App.ActiveDocument.addObject("Sketcher::SketchObject", name)
+        s.Placement = App.Placement(V(x0, -60, 0), App.Rotation())
+        pts = [V(0, 0, 0), V(10, 0, 0), V(10, 10, 0), V(0, 10, 0)]
+        for i in range(4):
+            s.addGeometry(Part.LineSegment(pts[i], pts[(i + 1) % 4]))
+        return s
+    rs1 = side_rect("CancelA", 0)
+    rs2 = side_rect("CancelB", 30)
+    App.ActiveDocument.recompute()
+    before_doc = set(App.ActiveDocument.Objects)         # the two sketches stay; only the panels' own objects must not
+    ed1 = editor.start(features.Extrude, Profile=rs1, Length=5)
+    yield 150
+    ed2 = editor.start(features.Extrude, Profile=rs2, Length=7, Operation="New body")    # no crash opening this
+    yield 150
+    is_current = editor.current() is ed2
+    try:                                        # fp1's name may already be reused by fp2; identity is what matters
+        ed1.fp.Name
+        fp1_gone = False
+    except Exception:
+        fp1_gone = True
+    cancel_btn = next(b for b in ed2.findChildren(QtWidgets.QPushButton) if b.text() == "Cancel")
+    press(cancel_btn)
+    yield 300
+    left_over = set(App.ActiveDocument.Objects) - before_doc
+    check("a second panel opened over an unclosed first one doesn't crash, and Cancel leaves nothing behind",
+          is_current and fp1_gone and not left_over,
+          (is_current, fp1_gone, sorted(o.Name for o in left_over)))
+
 
 def run(gen):
     try:

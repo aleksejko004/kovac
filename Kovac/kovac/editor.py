@@ -819,11 +819,20 @@ def point_input():
     return row if isinstance(row, _ViewportPoints) else None
 
 
+def close_current():
+    """Close whatever panel is already open (OK if it was editing, Cancel if it was new),
+    before starting or opening another one. Must run before a new transaction is opened or a
+    new feature created: start()/edit() used to do this *after*, inside open_editor() -- late
+    enough that Cancelling the panel just opened could abort the transaction the previous
+    command's own feature was created under, deleting it out from under its own panel (a
+    ReferenceError on fp.Document, since nothing closed the first panel first)."""
+    if _current is not None:
+        _current.reject() if _current.new else _current.accept()
+
+
 def open_editor(fp, new):
     """Show the panel for fp (inside a transaction the caller opened)."""
     global _current
-    if _current is not None:
-        _current.reject() if _current.new else _current.accept()
     from kovac import panel
     ed = Editor(fp, new)
     title = ("New " if new else "Edit ") + fp.Label
@@ -841,6 +850,7 @@ def open_editor(fp, new):
 
 def start(proxy, name=None, **props):
     """Create a feature at the rollback marker and open its panel (one transaction)."""
+    close_current()
     doc = App.ActiveDocument
     if doc is None:
         from kovac import startpage
@@ -852,6 +862,7 @@ def start(proxy, name=None, **props):
 
 def edit(fp):
     """Edit a history feature: the model rolls back to it while the panel is open."""
+    close_current()
     doc = fp.Document
     before = model.rollback_index(doc)
     its = model.items(doc)
