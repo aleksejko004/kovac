@@ -1,6 +1,6 @@
 # ADR-0004 — Components and joints
 
-- **Status:** Proposed 2026-10-12, awaiting owner approval. Owner decisions already taken: components live in the same design by default, with other files linked in later (plan step 5); positions that joints drive stay out of the history; drawings wait, assemblies come first.
+- **Status:** Accepted 2026-10-12 (owner: "build it as you see fit"); first version built, see "Built so far". Owner decisions already taken: components live in the same design by default, with other files linked in later (plan step 5); positions that joints drive stay out of the history; drawings wait, assemblies come first.
 - **Plan:** `docs/design/assemblies-plan.md`
 - **Prototype:** `prototypes/adr0004_assembly.py` (results in `prototypes/adr0004_results.json`); run with `py tools/fc.py cmd prototypes/adr0004_assembly.py`
 - **Builds on:** ADR-0002 (one history per document; bodies are what the user sees), ADR-0003 (references)
@@ -124,3 +124,21 @@ Writing all joint origins from references takes about 1.3 ms per joint, once per
 - **One history per component.** Simpler instancing, but it breaks ADR-0002's single history and the owner's "one file, one history" choice. Not chosen for internal components. External components (step 5) are naturally their own documents with their own history.
 - **FreeCAD's element names as the joint's truth.** Works for ordinary edits (E3), but follows a redrawn sketch without saying so, and gives FreeCAD's messages instead of ours. Kept as the fallback if the owner prefers it.
 - **Our own solver.** No reason: the bundled one is fast enough once it starts from a pre-placed state and Kovač checks its answers.
+
+## Built so far (2026-10-12)
+
+- `components.py`: the design assembly, components and instances, frames, picks through paths,
+  global-scope links with a migration for older designs, deleting a component.
+- `joints.py`: snaps, joint origins, writing them into FreeCAD's joints, snapping parts into
+  place, the solve check, ground and drag.
+- `assemble.py`: the Assemble ribbon group (New Component, New Instance, Joint, Drag, Ground).
+- `move.py`: Move with "Components".
+- Tests: `tests/test_components.py` (16 headless tests) and GUI segment `assembly`.
+
+Deviations from the decision above:
+- **Joints are not in the timeline yet.** Creating or editing a joint is one undo step, and joints
+  are listed in the browser. Making them timeline items needs the history to hold non-geometry
+  items; that comes later.
+- **No nested components yet.** New components always sit at the top of the design.
+- **A seam is not a snap point.** A round face's seam edge, and the seam vertex of a circle, offer
+  their face's snaps (axis, rim centres) instead of points nobody means to pick.

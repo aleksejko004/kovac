@@ -1179,7 +1179,164 @@ def seg_offset():
     yield 300
 
 
-SEGMENTS = [("bracket", seg_bracket), ("curve3d", seg_curve3d), ("move", seg_move), ("offset", seg_offset)]
+def seg_assembly():
+    """Components, a joint picked by clicking, dragging a hinged part, instances, Move Components."""
+    import Sketcher
+    from kovac import assemble, components, editor, features, joints, model, move, navigation, sketchmode, tree, views
+    doc = App.newDocument("AssemblyTest")
+    yield 300
+
+    def sk_of(geos, name):
+        sk = sketchmode.create("XY", name=name)
+        for g in geos:
+            sk.addGeometry(g)
+        sketchmode.finish()
+        return sk
+    pts = [V(0, 0, 0), V(60, 0, 0), V(60, 40, 0), V(0, 40, 0)]
+    plate_sk = sk_of([Part.LineSegment(pts[i], pts[(i + 1) % 4]) for i in range(4)], "Plate")
+    yield 300
+    editor.start(features.Extrude, Profile=plate_sk, Length=10).accept()
+    yield 300
+    hole = sk_of([Part.Circle(V(15, 20, 0), V(0, 0, 1), 5)], "Hole")
+    hole.addConstraint(Sketcher.Constraint("DistanceX", -1, 1, 0, 3, 15))
+    hole.addConstraint(Sketcher.Constraint("DistanceY", -1, 1, 0, 3, 20))
+    yield 300
+    ed = editor.start(features.Extrude, Profile=hole, Length=10)
+    ed.fp.Operation = "Cut"
+    ed.accept()
+    yield 300
+    pin_sk = sk_of([Part.Circle(V(100, 0, 0), V(0, 0, 1), 4.5)], "Pin")
+    yield 300
+    ed = editor.start(features.Extrude, Profile=pin_sk, Length=30)
+    ed.fp.Operation = "New body"
+    ed.accept()
+    yield 400
+    plate_b = next(b for b in bodies() if b.Shape.BoundBox.XMax > 59)
+    pin_b = next(b for b in bodies() if b is not plate_b)
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 500
+
+    # -- New Component from a clicked body (twice) --
+    Gui.Selection.clearSelection()
+    click_at(V(45, 30, 10))
+    yield 200
+    command("Kovac_NewComponent")
+    yield 300
+    plate_c = components.holder(plate_b)
+    Gui.Selection.clearSelection()
+    click_at(V(100, 0, 30))
+    yield 200
+    command("Kovac_NewComponent")
+    yield 400
+    pin_c = components.holder(pin_b)
+    br = Gui.getMainWindow().findChild(QtWidgets.QFrame, "kovacBrowser")
+    tw = br.findChild(QtWidgets.QTreeWidget) if br else None
+    labels = [it.text(0) for it in tw.findItems("", QtCore.Qt.MatchContains | QtCore.Qt.MatchRecursive)] if tw else []
+    check("New Component: each clicked body (and its sketch) goes into a component of its own, shown at the top of the browser",
+          plate_c is not None and pin_c is not None and plate_c != pin_c and pin_sk in pin_c.Group and
+          plate_c.Label in labels and pin_c.Label in labels, (plate_c and plate_c.Label, pin_c and pin_c.Label, labels[:12]))
+
+    # -- Joint: hover shows markers, click the hole's rim then the pin's top rim --
+    command("Kovac_Joint")
+    yield 300
+    tool = assemble._tool
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 400
+    rim = V(15 + 5 * math.cos(math.radians(225)), 20 + 5 * math.sin(math.radians(225)), 10)   # the rim, facing the camera
+    mouse(QtCore.QEvent.MouseMove, to_qt(rim))
+    yield 200
+    check("Joint: hovering the hole's rim shows a joint-origin marker", tool is not None and len(tool.nodes) >= 1,
+          tool and len(tool.nodes))
+    click_at(rim)
+    yield 300
+    pin_rim = V(104.5, 0, 30)
+    click_at(pin_rim)
+    yield 500
+    j = tool.joint if tool else None
+    check("Joint: two clicks make the joint, the pin snaps onto the hole and the plate is grounded",
+          j is not None and joints.satisfied(j) and joints.grounded(doc) == [plate_c] and
+          (pin_c.Placement.multVec(V(100, 0, 30)) - V(15, 20, 10)).Length < 1e-4,
+          (j and j.Label, tool and tool.status.text(), pin_c.Placement))
+    tool.choice.setCurrentText("Revolute")
+    yield 300
+    press([b for b in tool.dock.findChildren(QtWidgets.QPushButton) if b.text() == "OK"][0])
+    yield 400
+    check("Joint: Revolute chosen in the panel, OK keeps it as one undo step",
+          j.JointType == "Revolute" and doc.UndoNames[:1] == ["Joint"] and assemble._tool is None, (j.JointType, doc.UndoNames[:3]))
+    yield 300
+    jl = [it.text(0) for it in tw.findItems("Joints", QtCore.Qt.MatchStartsWith | QtCore.Qt.MatchRecursive)] if tw else []
+    check("the browser's Joints folder lists the joint and the ground", jl == ["Joints  (2)"], jl)
+    shot("assembly_joint")
+
+    # -- Drag: the pin turns about the hole's axis, the plate holds still --
+    command("Kovac_DragComponent")
+    yield 200
+    rot0 = App.Rotation(pin_c.Placement.Rotation)
+    side = pin_c.Placement.multVec(V(104.5, 0, 15))
+    a = to_qt(side)
+    b = a + QtCore.QPoint(40, 30)
+    L = QtCore.Qt.LeftButton
+    mouse(QtCore.QEvent.MouseButtonPress, a, L, L)
+    for k in range(1, 9):
+        mouse(QtCore.QEvent.MouseMove, a + (b - a) * (k / 8), QtCore.Qt.NoButton, L)
+        yield 30
+    mouse(QtCore.QEvent.MouseButtonRelease, b, L, QtCore.Qt.NoButton)
+    yield 300
+    turned = math.degrees(rot0.inverted().multiply(pin_c.Placement.Rotation).Angle)
+    check("Drag: pulling the pin turns it about the hinge; the joint holds and the grounded plate stays",
+          joints.satisfied(j) and plate_c.Placement.isSame(App.Placement(), 1e-9) and
+          (pin_c.Placement.multVec(V(100, 0, 30)) - V(15, 20, 10)).Length < 1e-4 and turned > 1,
+          (turned, pin_c.Placement))
+    command("Kovac_DragComponent")              # the command again ends dragging
+    yield 200
+
+    # -- the hole moves by its dimension: the joint follows --
+    with __import__("kovac").commands.transaction("Edit hole", doc):
+        hole.setDatum(0, App.Units.Quantity("25 mm"))
+        model.commit(doc)
+    yield 400
+    check("a joint follows its hole when the hole's dimension changes",
+          j.KovacStatus == "" and (pin_c.Placement.multVec(V(100, 0, 30)) - V(25, 20, 10)).Length < 1e-4, pin_c.Placement)
+
+    # -- New Instance, then Move Components on it --
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(pin_c)
+    command("Kovac_NewInstance")
+    yield 400
+    inst = next((o for o in doc.Objects if components.is_instance(o)), None)
+    check("New Instance: a linked copy of the pin component sits beside it", inst is not None and inst.Label.endswith("(2)"),
+          inst and inst.Label)
+    before = App.Placement(inst.Placement)
+    command("Kovac_Move")
+    yield 400
+    sess = move._session
+    check("Move with a component selected moves the component (Components in the drop-down)",
+          sess is not None and sess.move_type == "Components", sess and sess.move_type)
+    if sess is not None:
+        sess.begin(0)
+        sess.translate(0, 12)
+        sess.end()
+        yield 200
+        check("Move Components: the instance moves 12 mm along X, not a history step",
+              (inst.Placement.Base - before.Base - V(12, 0, 0)).Length < 1e-6 and
+              not any(type(getattr(o, "Proxy", None)).__name__ == "Transform" for o in model.items(doc)),
+              inst.Placement)
+        move.finish()
+    yield 200
+
+    # -- undo the joint: gone, the pin back where it was --
+    for _ in range(10):
+        if doc.UndoNames and doc.UndoNames[0] == "Joint":
+            break
+        doc.undo()
+        yield 100
+    doc.undo()
+    yield 400
+    check("Undo removes the joint again", not joints.all_joints(doc), [o.Name for o in joints.all_joints(doc)])
+
+
+SEGMENTS = [("bracket", seg_bracket), ("curve3d", seg_curve3d), ("move", seg_move), ("offset", seg_offset),
+            ("assembly", seg_assembly)]
 
 
 def scenario():

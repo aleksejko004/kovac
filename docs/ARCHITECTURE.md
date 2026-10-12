@@ -40,6 +40,10 @@ Part / Sketcher / PartDesign / …                         zoom to cursor, click
                                           sketchmode.py sketch entry and Finish Sketch
                                           manip.py      arrow manipulator with floating value field
                                           grid.py       ground grid and snapping
+                                          ── assemblies (ADR-0004) ─────────────────────────
+                                          components.py components, instances, frames, picks through them
+                                          joints.py     joint origins, snaps, solve check, drag
+                                          assemble.py   New Component / Instance, Joint, Drag, Ground
                                           params.py     named parameters
                                           inspect_tools.py mass properties, interference, section,
                                                         draft analysis, materials panel

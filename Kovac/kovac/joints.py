@@ -61,6 +61,19 @@ def placement(origin, z, x=None):
     return App.Placement(m)
 
 
+def _unique_faces(shape, edge):
+    out = []
+    for f in shape.ancestorsOfType(edge, Part.Face):
+        if not any(f.isSame(g) for g in out):
+            out.append(f)
+    return out
+
+
+def _is_seam(shape, edge):
+    """The seam line of a closed round face (both sides are the same face)."""
+    return len(_unique_faces(shape, edge)) == 1
+
+
 def _flat_neighbour(shape, edge):
     for f in shape.ancestorsOfType(edge, Part.Face):
         if isinstance(f.Surface, Part.Plane):
@@ -96,6 +109,9 @@ def snaps(shape, element):
             out.append(("centre", placement(f.CenterOfMass, _normal(f))))
     elif kind == "Edge":
         e = shape.Edges[i - 1]
+        if _is_seam(shape, e):               # the seam of a round face: offer the face's snaps
+            f = _unique_faces(shape, e)[0]
+            return snaps(shape, "Face%d" % next(n for n, g in enumerate(shape.Faces, 1) if g.isSame(f)))
         c = e.Curve
         nb = _flat_neighbour(shape, e)
         if isinstance(c, Part.Circle):
@@ -108,7 +124,14 @@ def snaps(shape, element):
             z = _normal(nb) if nb else d
             out += [("end", placement(a, z)), ("end", placement(b, z))]
     elif kind == "Vertex":
-        p = shape.Vertexes[i - 1].Point
+        v = shape.Vertexes[i - 1]
+        edges = [e for e in shape.ancestorsOfType(v, Part.Edge) if not _is_seam(shape, e)]
+        ring = [e for e in edges if e.isClosed()]
+        if ring and len(edges) == len(ring):
+            # a circle's seam point means nothing to the user: offer what its circle offers
+            k = next(n for n, e in enumerate(shape.Edges, 1) if e.isSame(ring[0]))
+            return snaps(shape, "Edge%d" % k)
+        p = v.Point
         faces = [f for f in shape.ancestorsOfType(shape.Vertexes[i - 1], Part.Face) if isinstance(f.Surface, Part.Plane)]
         out.append(("corner", placement(p, _normal(faces[0]) if faces else V(0, 0, 1))))
     return out

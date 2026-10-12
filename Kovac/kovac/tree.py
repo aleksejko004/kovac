@@ -44,6 +44,8 @@ def role(obj):
         return "component"                           # an instance
     if hasattr(obj, "ObjectToGround"):
         return "joint"                               # a ground
+    if tid == "Assembly::JointGroup":
+        return "machinery"                           # its joints show in the Joints folder
     if tid in ("App::Origin", "App::Link", "App::VarSet") or tid.endswith("Binder"):
         return "machinery"
     if tid in ("App::Line", "App::Plane", "App::Point") and any(p.TypeId == "App::Origin" for p in obj.InList):
