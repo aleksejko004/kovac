@@ -1,6 +1,6 @@
 # Bodies, components and assemblies — plan (proposal, 2026-10-12)
 
-Status: **proposal**; owner decisions 1 and 2 accepted 2026-10-12, 3 open (see "Decisions needed"). Nothing here is built yet.
+Status: **proposal**; owner decisions 1–3 taken 2026-10-12 (see "Decisions needed"). Step 0 done, awaiting review: ADR-0004 (proposed) with the prototype's measurements. Nothing user-facing is built yet.
 
 Sources, per the clean-room rules: FreeCAD 1.1.4's Assembly workbench and its bundled solver
 (OndselSolver, both LGPL, already inside the build Kovač runs on), classical kinematics (the lower
@@ -34,12 +34,12 @@ product, its documentation or its tutorials were consulted.
 Each step ends like a milestone: tests first for the logic, GUI segment checks, a short report,
 then a stop for owner review.
 
-### Step 0 — ADR-0004 and a spike (about 1 session)
+### Step 0 — ADR-0004 and a spike — done 2026-10-12, see ADR-0004
 - Prototype the three risky pieces headless: Kovač bodies inside `App::Part` containers (placement
   of the container moves the bodies; history features still compute correctly), instances via
   `App::Link`, and a FreeCAD joint whose references point at Kovač body faces, re-resolved through
-  Kovač's reference layer after an upstream edit (FreeCAD stores plain element names like `Face6`,
-  which break on edits — the same weakness ADR-0002 measured).
+  Kovač's reference layer after an upstream edit (FreeCAD stores element names like `Face6`;
+  result: FreeCAD 1.1 tracks them through ordinary edits too, see ADR-0004).
 - Measure solve time for 5 / 20 / 50 components (budget: drag at ≥ 30 fps, so a solve < 30 ms).
 - Write ADR-0004 (component and joint model) with the measured results; add OndselSolver to
   `THIRD_PARTY.md` (bundled, no new download).
@@ -100,8 +100,7 @@ then a stop for owner review.
    (simplest to start, one history); external components (step 5) for parts reused across designs.
 2. **Are joint-driven positions part of the history?** *Accepted.* Proposal: no. Positions are assembly state
    (moving a hinged lid shouldn't add a timeline step); creating or editing a joint is.
-3. **Where does this go in the milestones?** The README lists "drawings, assemblies" as M3.
-   Proposal: finish M3 drawings first, then run these steps as M4, unless assemblies come first.
+3. **Where does this go in the milestones?** *Decided: assemblies first; drawings (mostly built) wait.*
 
 ## How joints survive changes to the bodies
 
@@ -137,8 +136,10 @@ Tests: the torture suite (`tests/test_torture.py`) gets a joint variant of each 
 edit runs on a jointed pair, then checks that the joint resolves to the same tag and that the
 solved position matches the expected one.
 
-## Main risk
+## Main risk (after Step 0)
 
-FreeCAD's joints name geometry by element index (`Face6`), which changes when a part is edited.
-Step 0 must prove that Kovač's reference layer can sit in front of it; if it can't, joints keep
-working for unchanged parts but break on edits, loudly, with a re-pick — never silently wrong.
+The feared one, joints breaking when faces renumber, turned out small: FreeCAD 1.1's own naming
+and Kovač's references both kept the joints through every ordinary edit in the prototype
+(ADR-0004, E3). The real risk found is the solver: from badly placed starting positions it can
+report success on a wrong answer. Hence: snap parts into place when they are jointed, and check
+every solve ourselves (ADR-0004, decision 4).

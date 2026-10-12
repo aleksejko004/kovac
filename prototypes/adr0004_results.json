@@ -1,0 +1,215 @@
+{
+ "E1": {
+  "local_unchanged": true,
+  "shown_moved": true,
+  "feature_in_moved_component": true
+ },
+ "E2": {
+  "link_follows_edit": true,
+  "link_placed": true,
+  "pick_through_link_is_body": true,
+  "pick_ref_through_link": true
+ },
+ "E3": {
+  "freecad": [
+   [
+    "as built",
+    [
+     "ok ('Body.Edge15', 'Body001.Edge2')",
+     "ok ('Body.Edge16', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "holes move and grow",
+    [
+     "ok ('Body.Edge16', 'Body001.Edge2')",
+     "ok ('Body.Edge15', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "a hole inserted upstream (faces renumber)",
+    [
+     "ok ('Body.Edge17', 'Body001.Edge2')",
+     "ok ('Body.Edge18', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "fillet inserted upstream",
+    [
+     "ok ('Body.Edge19', 'Body001.Edge2')",
+     "ok ('Body.Edge20', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "saved, reopened, holes moved again",
+    [
+     "ok ('Body.Edge19', 'Body001.Edge2')",
+     "ok ('Body.Edge20', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "first hole's cut deleted",
+    [
+     "broken: FreeCAD marks the joint invalid",
+     "ok ('Body.Edge18', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "second hole deleted and drawn again elsewhere",
+    [
+     "broken: FreeCAD marks the joint invalid",
+     "ok ('Body.Edge18', 'Body001.Edge2')"
+    ]
+   ]
+  ],
+  "kovac": [
+   [
+    "as built",
+    [
+     "ok ('Body.Edge15', 'Body001.Edge2')",
+     "ok ('Body.Edge16', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "holes move and grow",
+    [
+     "ok ('Body.Edge16', 'Body001.Edge2')",
+     "ok ('Body.Edge15', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "a hole inserted upstream (faces renumber)",
+    [
+     "ok ('Body.Edge17', 'Body001.Edge2')",
+     "ok ('Body.Edge18', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "fillet inserted upstream",
+    [
+     "ok ('Body.Edge19', 'Body001.Edge2')",
+     "ok ('Body.Edge20', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "saved, reopened, holes moved again",
+    [
+     "ok ('Body.Edge19', 'Body001.Edge2')",
+     "ok ('Body.Edge20', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "first hole's cut deleted",
+    [
+     "broken: Missing reference: the edge it was attached to is gone",
+     "ok ('Body.Edge18', 'Body001.Edge2')"
+    ]
+   ],
+   [
+    "second hole deleted and drawn again elsewhere",
+    [
+     "broken: Missing reference: the edge it was attached to is gone",
+     "broken: Missing reference: the edge it was attached to is gone"
+    ]
+   ]
+  ]
+ },
+ "E4": {
+  "Fixed, 5 components, start untilted": {
+   "first_solve_ms": 1.8,
+   "first_solve_verified": true,
+   "drag_solve_ms_median": 1.8,
+   "drag_solve_ms_max": 2.6,
+   "drag_verified": true,
+   "write_origins_ms": 5.4
+  },
+  "Fixed, 20 components, start untilted": {
+   "first_solve_ms": 7.3,
+   "first_solve_verified": true,
+   "drag_solve_ms_median": 9.2,
+   "drag_solve_ms_max": 10.0,
+   "drag_verified": true,
+   "write_origins_ms": 26.0
+  },
+  "Fixed, 50 components, start untilted": {
+   "first_solve_ms": 33.8,
+   "first_solve_verified": true,
+   "drag_solve_ms_median": 32.1,
+   "drag_solve_ms_max": 33.7,
+   "drag_verified": true,
+   "write_origins_ms": 67.7
+  },
+  "Revolute, 5 components, start untilted": {
+   "first_solve_ms": 3.5,
+   "first_solve_verified": true,
+   "drag_solve_ms_median": 1.7,
+   "drag_solve_ms_max": 1.8,
+   "drag_verified": true,
+   "write_origins_ms": 5.1
+  },
+  "Revolute, 20 components, start untilted": {
+   "first_solve_ms": 17.3,
+   "first_solve_verified": true,
+   "drag_solve_ms_median": 8.2,
+   "drag_solve_ms_max": 9.3,
+   "drag_verified": true,
+   "write_origins_ms": 26.1
+  },
+  "Revolute, 50 components, start untilted": {
+   "first_solve_ms": 177.1,
+   "first_solve_verified": true,
+   "drag_solve_ms_median": 29.3,
+   "drag_solve_ms_max": 30.4,
+   "drag_verified": true,
+   "write_origins_ms": 68.9
+  },
+  "Revolute, 5 components, start tilted 10\u00b0 each": {
+   "first_solve_ms": 8.6,
+   "first_solve_verified": false,
+   "drag_solve_ms_median": 3.0,
+   "drag_solve_ms_max": 3.3,
+   "drag_verified": false,
+   "write_origins_ms": 5.3
+  },
+  "Revolute, 20 components, start tilted 10\u00b0 each": {
+   "first_solve_ms": 249.7,
+   "first_solve_verified": false,
+   "drag_solve_ms_median": 66.4,
+   "drag_solve_ms_max": 82.4,
+   "drag_verified": false,
+   "write_origins_ms": 26.0
+  },
+  "Revolute, 50 components, start tilted 10\u00b0 each": {
+   "first_solve_ms": 3509.5,
+   "first_solve_verified": false,
+   "drag_solve_ms_median": 2550.0,
+   "drag_solve_ms_max": 3500.7,
+   "drag_verified": false,
+   "write_origins_ms": 69.2
+  },
+  "Revolute, 5 components, start snapped into place when jointed": {
+   "first_solve_ms": 1.3,
+   "first_solve_verified": true,
+   "drag_solve_ms_median": 1.6,
+   "drag_solve_ms_max": 1.8,
+   "drag_verified": true,
+   "write_origins_ms": 5.1
+  },
+  "Revolute, 20 components, start snapped into place when jointed": {
+   "first_solve_ms": 3.8,
+   "first_solve_verified": true,
+   "drag_solve_ms_median": 8.2,
+   "drag_solve_ms_max": 8.7,
+   "drag_verified": true,
+   "write_origins_ms": 25.2
+  },
+  "Revolute, 50 components, start snapped into place when jointed": {
+   "first_solve_ms": 10.7,
+   "first_solve_verified": true,
+   "drag_solve_ms_median": 28.6,
+   "drag_solve_ms_max": 30.7,
+   "drag_verified": true,
+   "write_origins_ms": 64.6
+  }
+ }
+}
