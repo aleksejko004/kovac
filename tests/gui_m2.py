@@ -520,6 +520,14 @@ def scenario():
     check("dragging the arrow changes the distance", dragged > 6, dragged)
     ed.set("Length", 5)
     yield 300
+    from kovac import manip
+    a, b = arrow.seg
+    on_face = min((a - (o + n * 5)).Length, (b - (o + n * 5)).Length) < 1e-6
+    check("the extrude arrow keeps one size on screen and starts on the extruded face",
+          on_face and abs((b - a).Length / arrow.px - manip.ARROW_PX) < 1, (a, b, arrow.px))
+    mid = to_qt((a + b) * 0.5)
+    check("the arrow is grabbed along its whole length, not only at its tip",
+          arrow._screen_distance(navigation.install(), mid) < 2)
     # panels never block the view or the tree
     c = QtCore.QPoint(vp().width() // 2, vp().height() // 2)
     import pivy.coin  # noqa: F401
@@ -943,7 +951,33 @@ def scenario():
     check("Move: dragging the X arrow slides the body along X, the Z handle turns it",
           slid.x > 5 and abs(slid.y) < 1e-9 and abs(slid.z) < 1e-9 and turned >= 5 and
           (edm.fp.Move.Rotation.Axis - V(0, 0, 1)).Length < 1e-6, (slid, turned, edm.fp.Move.Rotation.Axis))
+    combo = edm.findChild(QtWidgets.QComboBox, "kovacMoveType")
+    check("the Move panel has a drop-down for what to move", combo is not None and combo.currentText() == "Bodies",
+          combo and combo.currentText())
     edm.accept()
+    yield 300
+
+    # a face clicked, then Move: the drop-down turns the bodies move into a face move, and back
+    top = next(i for i, f in enumerate(bm.Shape.Faces) if abs(f.CenterOfMass.z - 10) < 1e-6 and f.normalAt(0, 0).z > 0.9)
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(bm, "Face%d" % (top + 1))
+    command("Kovac_Move")
+    yield 400
+    edm = editor.current()
+    edm.findChild(QtWidgets.QComboBox, "kovacMoveType").setCurrentText("Faces")
+    yield 500
+    edf = editor.current()
+    check("Move: choosing Faces moves the clicked face instead of its body",
+          edf is not None and type(edf.fp.Proxy).kind == "MoveFace" and bool(edf.fp.Face) and
+          any(isinstance(h, move.Triad) for h in edf.hooks), edf and edf.fp.Face)
+    edf.findChild(QtWidgets.QComboBox, "kovacMoveType").setCurrentText("Bodies")
+    yield 500
+    edb = editor.current()
+    check("Move: choosing Bodies again moves the face's body, the face move left nothing behind",
+          type(edb.fp.Proxy).kind == "Move" and list(edb.fp.Bodies) == [bm.BodyId] and
+          not any(type(getattr(o, "Proxy", None)).__name__ == "MoveFace" for o in App.ActiveDocument.Objects),
+          (list(edb.fp.Bodies), [o.Name for o in App.ActiveDocument.Objects]))
+    edb.reject()
     yield 300
 
     # -- Move in a sketch: a corner dragged up out of the plane takes both its lines into 3D --

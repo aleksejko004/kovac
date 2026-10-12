@@ -66,12 +66,12 @@ SCHEMAS = {
     "Draft": [("picks", "Faces", "Faces", ("Face",)), ("pick", "Neutral", "Neutral face", ("Face",)),
               ("value", "Angle", "Angle"), ("bool", "Reverse", "Reverse pull")],
     "FacePull": [("pick", "Face", "Face", ("Face",)), ("value", "Distance", "Distance")],
-    "MoveFace": [("pick", "Face", "Face", ("Face",)), ("move", "Move", "Move by")],
+    "MoveFace": [("movetype",), ("pick", "Face", "Face", ("Face",)), ("move", "Move", "Move by")],
     "DeleteFace": [("picks", "Faces", "Faces", ("Face",))],
     "Combine": [("body", "Target", "Target body"), ("bodies", "Tools", "Tool bodies"), ("enum", "Operation", "Operation"),
                 ("bool", "KeepTools", "Keep tools")],
     "SplitBody": [("body", "Body", "Body"), ("plane", "Plane", "Split with")],
-    "Move": [("bodies", "Bodies", "Bodies"), ("move", "Move", "Move by"), ("bool", "Copy", "Copy")],
+    "Move": [("movetype",), ("bodies", "Bodies", "Bodies"), ("move", "Move", "Move by"), ("bool", "Copy", "Copy")],
     "Scale": [("bodies", "Bodies", "Bodies"), ("float", "Factor", "Factor"), ("vector", "Center", "About point")],
     "Mirror": [("bodies", "Bodies", "Bodies"), ("plane", "Plane", "Mirror plane"), ("bool", "Join", "Join with the original")],
     "Pattern": [("features", "Sources", "Features"), ("bodies", "Bodies", "or bodies"), ("enum", "Type", "Type"),
@@ -554,6 +554,14 @@ class Editor(QtWidgets.QWidget):
             box.addWidget(combo)
             box.addWidget(self.op_label)
             form.addRow("Result", box)
+            return
+        if kind == "movetype":           # Move: what the triad moves -- whole bodies or one face
+            from kovac import move
+            combo = QtWidgets.QComboBox(objectName="kovacMoveType")
+            combo.addItems(move.TYPES)
+            combo.setCurrentText(move.type_of(fp))
+            combo.currentTextChanged.connect(lambda t: QtCore.QTimer.singleShot(0, lambda: move.switch(self, t)))
+            form.addRow("Move", combo)
             return
         if kind == "groups":
             b = QtWidgets.QPushButton("Add a group with its own size")

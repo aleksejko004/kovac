@@ -572,6 +572,8 @@ def command():
             return _start(PlaneTarget(s.Object), "Move " + s.Object.Label)
     faces = [model.pick_ref(s.Object, sub) for s in sel for sub in s.SubElementNames if sub.split(".")[-1].startswith("Face")]
     faces = [f for f in faces if f]
+    global _picked_faces
+    _picked_faces = faces
     kinds = set(getattr(navigation.select_filter, "kinds", None) or ())
     if faces and "face" in kinds and "body" not in kinds:       # the Faces filter: move or tilt the face
         from kovac import modify
@@ -580,6 +582,35 @@ def command():
     if ed.fp.Bodies:
         ed.fp.Pivot = bodies_centre(ed.fp)
     return ed
+
+
+_picked_faces = []      # the faces picked when Move started, for switching to "Faces" in its panel
+TYPES = ("Bodies", "Faces")
+
+
+def type_of(fp):
+    return "Faces" if type(fp.Proxy).kind == "MoveFace" else "Bodies"
+
+
+def switch(ed, what):
+    """The panel's "Move" drop-down: drop the move being set up and start the other kind on
+    the same picks -- a face's body for Bodies, the picked face (or one to pick) for Faces."""
+    from kovac import editor, modify, topo
+    if what == type_of(ed.fp):
+        return None
+    if what == "Faces":
+        bodies = set(ed.fp.Bodies)
+        now = [model.pick_ref(x.Object, sub) for x in Gui.Selection.getSelectionEx("", 0) for sub in x.SubElementNames]
+        faces = [f for f in [f for f in now if f] + _picked_faces if topo.loads(f)["k"] == "Face"]
+        faces = [f for f in faces if not bodies or topo.loads(f)["b"] in bodies]
+        ed.reject()
+        return editor.start(modify.MoveFace, **({"Face": faces[0]} if faces else {}))
+    bodies = [topo.loads(ed.fp.Face)["b"]] if ed.fp.Face else []
+    ed.reject()
+    new = editor.start(_transform(), Bodies=bodies)
+    if new.fp.Bodies:
+        new.fp.Pivot = bodies_centre(new.fp)
+    return new
 
 
 def _transform():

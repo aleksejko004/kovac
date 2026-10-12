@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """On-canvas manipulators: an arrow you drag, with a floating numeric field next to its tip.
 
+The arrow keeps one size on screen and sits on the face it moves (an Extrude's end face, a
+pulled face): out into free space it starts there, into material it comes in from outside
+with its tip there. It is drawn over the model and can be grabbed anywhere along it.
+
 Extrude distance and Face Pull distance get an arrow along the pull direction. Dragging back
 through zero flips the direction; with an automatic operation that flips Join <-> Cut live.
 The floating field is a FreeCAD quantity field bound to the same property: type a value,
@@ -13,7 +17,8 @@ from PySide import QtCore
 from kovac import model, navigation, overlay, palette, topo
 
 V = App.Vector
-HIT_PX = 26
+HIT_PX = 14          # pixels from the drawn arrow that still grab it
+ARROW_PX = 130       # arrow length on screen
 
 
 def _extrude_axis(fp):
@@ -95,7 +100,7 @@ ARROWS = {"Extrude": ("Length", _extrude_axis), "FacePull": ("Distance", _pull_a
 class Arrow:
     def __init__(self, ed, prop, axis_fn):
         self.ed, self.prop, self.axis_fn = ed, prop, axis_fn
-        self.node, self.axis = None, None
+        self.node, self.axis, self.seg = None, None, None
         self.field = None
         self.px = None
         navigation.hooks.insert(0, self)       # the arrow wins over region picks under it
@@ -113,20 +118,26 @@ class Arrow:
 
     def refresh(self):
         overlay.remove(self.node)
-        self.node, self.axis = None, self.axis_fn(self.ed.fp)
+        self.node, self.axis, self.seg = None, self.axis_fn(self.ed.fp), None
         if self.axis is None or Gui.activeView() is None:
             return
         o, n = self.axis
-        tip = o + n * self.value()
+        at = o + n * self.value()                # where the moving face is now
         it = navigation.install(Gui.activeView())
         px = self.px = it.px_size() if it is not None else 0.05
-        lead = 90 * px if self._into_part(o, n * (1 if self.value() >= 0 else -1), px) else 0.0
-        self.node = overlay.add(overlay.arrow_node(o, tip, palette.accent(), px, lead))
-        self.place_field(tip)
+        d = n * (1 if self.value() >= 0 else -1)
+        length = ARROW_PX * px                   # a fixed screen size: only its place follows the value
+        if self._into_part(at, d, px):           # heading into material: come in from outside, tip on the face
+            a, b = at - d * length, at
+        else:                                    # out into free space: start on the face
+            a, b = at, at + d * length
+        self.seg = (a, b)
+        self.node = overlay.add(overlay.arrow_node(a, b, palette.accent(), px))
+        self.place_field(b if b is not at else a)
 
     def _into_part(self, o, d, px):
         """Whether the arrow heads into material (a fillet on an outside edge, a cut): it then
-        starts well outside the part, reading as an arrow coming in rather than a stub."""
+        sits outside the part with its tip on the face, reading as an arrow coming in."""
         try:
             p = o + d.normalize() * max(px * 3, 1e-3)
             return any(b.shape.isInside(p, 1e-6, False) for b in model.input_state(self.ed.fp).values())
@@ -150,14 +161,26 @@ class Arrow:
         self.field.show()
 
     # viewport hook --------------------------------------------------------------
+    def _screen_distance(self, it, pos):
+        """Pixels from pos to the drawn arrow, shaft and head alike (it is drawn over the
+        model, so it is grabbed over the model too)."""
+        (ax, ay), (bx, by) = (it.qt(it.view.getPointOnViewport(p)) for p in self.seg)
+        px, py = pos.x(), pos.y()
+        dx, dy = bx - ax, by - ay
+        ll = dx * dx + dy * dy
+        t = 0.0 if ll < 1e-9 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / ll))
+        cx, cy = ax + dx * t, ay + dy * t
+        return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+
     def press(self, it, pos):
-        if self.axis is None:
+        if self.axis is None or self.seg is None:
+            return False
+        if self._screen_distance(it, pos) > HIT_PX:
             return False
         o, n = self.axis
-        x, y = it.view.getPointOnViewport(o + n * self.value())
-        tx, ty = it.qt((x, y))
-        if (tx - pos.x()) ** 2 + (ty - pos.y()) ** 2 > HIT_PX ** 2:
-            return False
+        ro, rd = overlay.ray(it, pos)
+        q = overlay.closest_on_line(ro, rd, o, n)
+        self.grab = self.value() - (q - o).dot(n)   # wherever it was grabbed, the value moves with the mouse, no jump
         self.dragging = True
         return True
 
@@ -165,7 +188,7 @@ class Arrow:
         o, n = self.axis
         ro, rd = overlay.ray(it, pos)
         q = overlay.closest_on_line(ro, rd, o, n)
-        value = round((q - o).dot(n), 2)
+        value = round((q - o).dot(n) + getattr(self, "grab", 0.0), 2)
         from kovac import grid
         s = grid.step()
         k = round(value / s) * s if s else 0
