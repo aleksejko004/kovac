@@ -200,8 +200,8 @@ def end_task(name):
 
 
 # ------------------------------------------------------------------ scenario
-def scenario():
-    from kovac import commands, editor, model, navigation, params, sketchmode, views
+def setup():
+    from kovac import commands, navigation, views
     mw = Gui.getMainWindow()
     mw.showMaximized()
     if mw.screen().availableGeometry().width() < 1700:     # CI screens: the ribbon is laid out for 1700 px
@@ -215,6 +215,11 @@ def scenario():
     views.go(view(), views.view_rotation(views.ISO))
     yield 400
 
+
+def seg_bracket():
+    """The L-bracket through the UI, panels, parameters, timeline, browser, sketch tools."""
+    from kovac import commands, curve3d, editor, features, model, move, navigation, params, sketchmode, views  # noqa: F401
+    mw = Gui.getMainWindow()  # noqa: F841
     # -- layout: big mode button, group names under their buttons, no stock navigation picker
     mb = mw.findChild(QtWidgets.QToolButton, "kovacModeButton")
     check("the big mode button shows the mode", mb is not None and mb.isVisible() and mb.text() == "DESIGN", mb and mb.text())
@@ -877,7 +882,13 @@ def scenario():
           ([it.text() for it in rows], tints))
     App.ActiveDocument.undo()
     yield 150
+    yield 100
 
+
+def seg_curve3d():
+    """A sketch's free B-spline becomes a 3D curve; its points drag in 3D."""
+    from kovac import commands, curve3d, editor, features, model, move, navigation, params, sketchmode, views  # noqa: F401
+    mw = Gui.getMainWindow()  # noqa: F841
     # -- 3D curve: a sketch's free B-spline leaves the sketch; its points then drag in 3D --
     App.newDocument("Curve3DTest")
     yield 300
@@ -911,7 +922,13 @@ def scenario():
     check("3D curve: dragging a point in a side view lifts it out of the sketch plane, one undo step",
           p1b.z > 2 and App.ActiveDocument.UndoNames[:1] == ["Move curve point"], (p1, p1b, App.ActiveDocument.UndoNames[:2]))
     curve3d.finish()
+    yield 100
 
+
+def seg_move():
+    """The Move triad: bodies, faces, sketch elements in and out of a sketch, typed amounts."""
+    from kovac import commands, curve3d, editor, features, model, move, navigation, params, sketchmode, views  # noqa: F401
+    mw = Gui.getMainWindow()  # noqa: F841
     # -- Move: the triad on a body -- drag the X arrow, then the turning handle about Z --
     from kovac import move
     App.newDocument("MoveTest")
@@ -1059,6 +1076,73 @@ def scenario():
     if edb is not None:
         edb.reject()
     yield 300
+    yield 100
+
+
+def seg_offset():
+    """Offset in a sketch: a B-spline (which the sketcher's own Offset drops) by arrow and by typed value."""
+    from kovac import navigation, sketchmode, sketchoffset, views
+    App.newDocument("OffsetTest")
+    yield 300
+    sk = sketchmode.create("XY")
+    g = sk.addGeometry(Part.BSplineCurve([V(0, 0, 0), V(10, 20, 0), V(30, -10, 0), V(40, 10, 0)], None, None, False, 3, None, False))
+    sk.exposeInternalGeometry(g)
+    App.ActiveDocument.recompute()
+    yield 500
+    n0 = len(sk.Geometry)
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(sk, "Edge%d" % (g + 1))
+    command("Kovac_SketchOffset")
+    yield 400
+    tool = sketchoffset._tool
+    check("Offset on a B-spline opens Kovač's offset with a live preview",
+          tool is not None and tool.result and isinstance(tool.result[0], Part.BSplineCurve) and tool.preview_node is not None,
+          tool and tool.result)
+    if tool is None:
+        return
+    it = navigation.install()
+    a, b = tool.arrow.seg
+    sc = lambda q: QtCore.QPointF(*it.qt(view().getPointOnViewport(q)))   # noqa: E731
+    d0 = tool.d
+    start, end = sc((a + b) * 0.5), sc((a + b) * 0.5 + tool.arrow.n * 6)
+    Lb = QtCore.Qt.LeftButton
+    for t, q, held in [(QtCore.QEvent.MouseButtonPress, start, Lb)] + \
+            [(QtCore.QEvent.MouseMove, start + (end - start) * k / 10, Lb) for k in range(1, 11)] + \
+            [(QtCore.QEvent.MouseButtonRelease, end, QtCore.Qt.NoButton)]:
+        QtWidgets.QApplication.sendEvent(vp(), QtGui.QMouseEvent(t, q, QtCore.QPointF(vp().mapToGlobal(q.toPoint())),
+                                                                 Lb if t != QtCore.QEvent.MouseMove else QtCore.Qt.NoButton, held,
+                                                                 QtCore.Qt.NoModifier))
+    yield 200
+    check("dragging the offset arrow inside the sketch changes the distance", tool.d > d0 + 3, (d0, tool.d))
+    tool.field.setText("4 mm")
+    tool.field.returnPressed.emit()
+    yield 400
+    new = [x for x in sk.Geometry[n0:] if isinstance(x, Part.BSplineCurve)]
+    base = Part.BSplineCurve([V(0, 0, 0), V(10, 20, 0), V(30, -10, 0), V(40, 10, 0)], None, None, False, 3, None, False).toShape()
+    err = max(abs(Part.Vertex(new[0].value(new[0].FirstParameter + (new[0].LastParameter - new[0].FirstParameter) * k / 30))
+                  .distToShape(base)[0] - 4) for k in range(31)) if new else None
+    check("typing 4 mm and Enter adds the offset spline 4 mm away, one undo step",
+          sketchoffset._tool is None and len(new) == 1 and err < 1e-3 and App.ActiveDocument.UndoNames[:1] == ["Offset"],
+          (len(new), err, App.ActiveDocument.UndoNames[:2]))
+    sketchmode.finish()
+    yield 300
+
+
+SEGMENTS = [("bracket", seg_bracket), ("curve3d", seg_curve3d), ("move", seg_move), ("offset", seg_offset)]
+
+
+def scenario():
+    """Every segment, or only those named in KOVAC_SEGMENTS (comma separated), each on
+    its own document after the common start-up."""
+    wanted = [s.strip() for s in os.environ.get("KOVAC_SEGMENTS", "").split(",") if s.strip()]
+    unknown = set(wanted) - {n for n, _ in SEGMENTS}
+    if unknown:
+        res["errors"].append("unknown segments: %s" % sorted(unknown))
+    yield from setup()
+    for name, seg in SEGMENTS:
+        if not wanted or name in wanted:
+            yield from seg()
+
 
 def run(gen):
     try:

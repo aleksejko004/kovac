@@ -29,7 +29,7 @@ SKETCH_TOOLS = [      # an inner list is one button with its variants behind the
                 ("Sketcher_CreatePoint", "spoint")]),
     ("Modify", [[("Sketcher_CreateFillet", "sk_fillet"), ("Sketcher_CreateChamfer", "sk_chamfer")],
                 ("Sketcher_Trimming", "trim"), ("Sketcher_Extend", "extend"), ("Sketcher_Split", "sk_split"),
-                ("Sketcher_Offset", "offset"), ("Sketcher_Symmetry", "sk_mirror"),
+                ("Kovac_SketchOffset", "offset"), ("Sketcher_Symmetry", "sk_mirror"),
                 [("Sketcher_Translate", "sk_move"), ("Sketcher_Rotate", "sk_rotate"), ("Sketcher_Scale", "sk_scale"),
                  ("Sketcher_RectangularArray", "sk_array")],
                 ("Sketcher_ToggleConstruction", "construction")]),

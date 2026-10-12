@@ -6,7 +6,7 @@ import FreeCADGui as Gui
 import Part
 
 import kovac
-from kovac import commands, curve3d, datum, editor, features, model, modify, sketchmode, sketchtools
+from kovac import commands, curve3d, datum, editor, features, model, modify, sketchmode, sketchoffset, sketchtools
 
 V = App.Vector
 
@@ -248,6 +248,8 @@ COMMANDS = [
      sketchtools.polygon_around, "polygon_out", "G, P, C"),
     ("Kovac_Curve3D", "3D curve", "A curve whose points move in 3D: from a sketch's free B-spline, or new; drag its points",
      curve3d.command, "spline", "G, 3, D"),
+    ("Kovac_SketchOffset", "Offset", "Offset sketch curves to one side, B-splines and ellipses included",
+     sketchoffset.command, "offset", "Z, T"),       # the key the sketcher's own Offset had
     ("Kovac_ConstrainMidpoint", "Midpoint", "Select a point and a line or arc: constrain the point to its midpoint",
      sketchtools.midpoint, "c_midpoint", "K, M"),
     ("Kovac_Delete", "Delete", "Delete the selection", delete, "delete", ""),
