@@ -246,6 +246,8 @@ def create(doc, proxy, name=None, index=None, **props):
             show(fp.ViewObject, transparency=70)   # reference geometry is drawn, see-through
     for k, v in props.items():
         setattr(fp, k, v)
+    if not proxy.state_feature and components.root(doc) is not None:
+        components.adopt(fp, components.ref_home(doc, list(props.values())))   # reference geometry
     insert(doc, fp, index)
     return fp
 

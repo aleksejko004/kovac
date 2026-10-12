@@ -38,6 +38,12 @@ def role(obj):
     if proxy in _FEATURE_PROXIES:
         return "feature"
     tid = obj.TypeId
+    if getattr(obj, "KovacRoot", False):            # the design's own assembly: its contents show at the top
+        return "machinery"
+    if tid == "App::Link" and getattr(obj.getLinkedObject(), "TypeId", "") == "App::Part":
+        return "component"                           # an instance
+    if hasattr(obj, "ObjectToGround"):
+        return "joint"                               # a ground
     if tid in ("App::Origin", "App::Link", "App::VarSet") or tid.endswith("Binder"):
         return "machinery"
     if tid in ("App::Line", "App::Plane", "App::Point") and any(p.TypeId == "App::Origin" for p in obj.InList):
@@ -65,8 +71,13 @@ def role(obj):
 
 def children(doc, parent=None):
     """Direct user-visible children of the document root or of a component."""
-    objs = parent.Group if parent is not None else [
-        o for o in doc.Objects if not any(p.TypeId in CONTAINERS + ("PartDesign::Body",) for p in o.InList)]
+    if parent is not None:
+        objs = parent.Group if parent.TypeId != "App::Link" else []
+    else:
+        objs = [o for o in doc.Objects if not any(p.TypeId in CONTAINERS + ("PartDesign::Body",) for p in o.InList)]
+        asm = next((o for o in objs if getattr(o, "KovacRoot", False)), None)
+        if asm is not None:          # the design's assembly is machinery: its components sit at the top
+            objs = [o for o in objs if o is not asm] + [o for o in asm.Group if o not in objs]
     return [o for o in objs if role(o) not in ("machinery", "feature")]
 
 
@@ -91,6 +102,14 @@ def item_icon(obj):
     if r == "reference":
         kind = type(getattr(obj, "Proxy", None)).__name__
         return kovac.icon({"DatumAxis": "axis", "DatumPoint": "point"}.get(kind, "plane"))
+    if r == "component" and obj.TypeId == "App::Link":
+        return kovac.icon("instance")
+    if r == "joint":
+        if hasattr(obj, "ObjectToGround"):
+            return kovac.icon("ground")
+        kind = {"Fixed": "j_rigid", "Revolute": "j_revolute", "Slider": "j_slider", "Cylindrical": "j_cylindrical",
+                "Ball": "j_ball", "Distance": "j_planar"}.get(getattr(obj, "JointType", ""), "joint")
+        return kovac.icon(kind)
     return kovac.icon(ICONS.get(r, "feature"))
 
 
@@ -102,7 +121,7 @@ def create():
     from PySide import QtCore, QtGui, QtWidgets
 
     import kovac
-    from kovac import commands
+    from kovac import commands, palette
 
     OBJ, VIEW, MEMBERS = QtCore.Qt.UserRole, QtCore.Qt.UserRole + 1, QtCore.Qt.UserRole + 2
     EYE = 1
@@ -210,6 +229,10 @@ def create():
                 folder.setData(0, MEMBERS, [(o.Document.Name, o.Name) for o in members])
                 for o in members:
                     it = self.item(folder, o.Label, o, QtGui.QIcon(item_icon(o)), o.Visibility)
+                    problem = getattr(o, "KovacStatus", "")
+                    if problem:                 # a joint whose reference is gone
+                        it.setForeground(0, QtGui.QBrush(QtGui.QColor(palette.SEMANTIC["error"])))
+                        it.setToolTip(0, problem)
                     for sk in body_sketches(o) if r == "body" else []:
                         self.item(it, sk.Label, sk, QtGui.QIcon(item_icon(sk)), sk.Visibility)
 
@@ -255,9 +278,15 @@ def create():
             from kovac import curve3d
             if curve3d.is_curve(o):
                 curve3d.edit(o)
-            elif o is not None and role(o) == "component":
-                Gui.ActiveDocument.ActiveView.setActiveObject("part", o)
+            elif o is not None and role(o) == "component" and o.TypeId == "App::Part":
+                from kovac import components          # double-click again: back to the top
+                view = Gui.ActiveDocument.ActiveView
+                now = view.getActiveObject("part") if hasattr(view, "getActiveObject") else None
+                components.set_active(o.Document, None if now is not None and now.Name == o.Name else o)
                 self.rebuild()
+            elif o is not None and role(o) == "joint" and hasattr(o, "KovacOrigin1"):
+                from kovac import assemble
+                assemble.edit_joint(o)
             elif it.data(0, VIEW):
                 Gui.activeView().setCamera(App.ActiveDocument.Meta[META_VIEW + it.data(0, VIEW)])
 
@@ -270,7 +299,16 @@ def create():
                 m.addAction("Rename", lambda: self.editItem(it, 0))
                 m.addAction("Hide" if o.Visibility else "Show", lambda: (setattr(o, "Visibility", not o.Visibility), self.rebuild()))
                 if role(o) == "component":
-                    m.addAction("Activate", lambda: self.double(it, 0))
+                    from kovac import assemble, joints
+                    if o.TypeId == "App::Part":
+                        m.addAction("Activate", lambda: self.double(it, 0))
+                    m.addAction("New instance", lambda: assemble.instance([o]))
+                    m.addAction("Move…", lambda: assemble.move_component(o))
+                    grounded = o in joints.grounded(o.Document)
+                    m.addAction("Unground" if grounded else "Ground", lambda: assemble.ground([o], not grounded))
+                if role(o) == "joint" and hasattr(o, "KovacOrigin1"):
+                    from kovac import assemble
+                    m.addAction("Edit joint…", lambda: assemble.edit_joint(o))
                 if role(o) == "body":
                     m.addAction("Material…", lambda: commands.run("Kovac_Material"))
                 if len(sel) > 1 and o in sel:
@@ -308,6 +346,11 @@ def create():
                             continue
                         if o in model.items(doc):
                             model.remove(doc, o)
+                        elif role(o) == "component":
+                            from kovac import components
+                            note = components.remove(o)
+                            if note:
+                                commands.report(note)
                         else:
                             doc.removeObject(o.Name)
             except Exception as e:

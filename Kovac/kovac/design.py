@@ -6,7 +6,7 @@ import FreeCADGui as Gui
 import Part
 
 import kovac
-from kovac import commands, curve3d, datum, editor, features, model, modify, sketchmode, sketchoffset, sketchtools
+from kovac import commands, components, curve3d, datum, editor, features, model, modify, sketchmode, sketchoffset, sketchtools
 
 V = App.Vector
 
@@ -24,17 +24,17 @@ def picks(*kinds):
 
 
 def selected_sketch():
-    for s in Gui.Selection.getSelectionEx("", 0):
-        if s.Object.TypeId.startswith("Sketcher::"):
-            return s.Object
+    for o, _el, _top, _sub in components.selected():
+        if o.TypeId.startswith("Sketcher::"):
+            return o
     return None
 
 
 def selected_bodies():
     out = []
-    for s in Gui.Selection.getSelectionEx("", 0):
-        if type(getattr(s.Object, "Proxy", None)).__name__ == "BodyProxy" and s.Object.BodyId not in out:
-            out.append(s.Object.BodyId)
+    for o, _el, _top, _sub in components.selected():
+        if type(getattr(o, "Proxy", None)).__name__ == "BodyProxy" and o.BodyId not in out:
+            out.append(o.BodyId)
     return out
 
 
@@ -89,15 +89,15 @@ def delete():
         return
     doc = App.ActiveDocument
     items, faces, bodies = [], [], []
-    for s in Gui.Selection.getSelectionEx("", 0):
-        o, subs = s.Object, [n for n in s.SubElementNames if n]
+    for o, el, top, sub in components.selected():
         if o in model.items(doc):
             items.append(o)
         elif hasattr(o, "BodyId"):
-            fs = [model.pick_ref(o, n) for n in subs if n.split(".")[-1].startswith("Face")]
-            if fs:
-                faces += [f for f in fs if f]
-            elif not subs:
+            if el.startswith("Face"):
+                f = model.pick_ref(top, sub)
+                if f:
+                    faces.append(f)
+            elif not el and o.BodyId not in bodies:
                 bodies.append(o.BodyId)
     if not (items or faces or bodies):
         raise ValueError("Select a body, a face, a sketch or a history item to delete.")
@@ -125,7 +125,7 @@ def sweep():
 
 
 def loft():
-    sks = [s.Object for s in Gui.Selection.getSelectionEx("", 0) if s.Object.TypeId.startswith("Sketcher::")]
+    sks = [o for o, _el, _t, _s in components.selected() if o.TypeId.startswith("Sketcher::")]
     editor.start(features.Loft, Sections=sks)
 
 

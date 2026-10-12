@@ -244,6 +244,8 @@ def create(base="XY", name="Sketch", then=None):
             plane.ViewObject.Visibility = False
         doc.recompute()
         sk = datum.sketch_on(doc, plane, name)
+        from kovac import components
+        components.adopt(sk, components.holder(plane) if components.root(doc) else None)
         model.insert(doc, sk)
         model.commit(doc)
     edit(sk, view)

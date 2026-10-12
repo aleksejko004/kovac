@@ -92,6 +92,8 @@ SCHEMAS = {
 
 # option values shown as icon buttons instead of a drop-down (all values of a property must be here)
 CHOICE_ICONS = {
+    "Rigid": "j_rigid", "Revolute": "j_revolute", "Slider": "j_slider", "Cylindrical": "j_cylindrical",
+    "Ball": "j_ball", "Planar": "j_planar",
     "Distance": "ext_distance", "To face": "ext_toface", "Through all": "ext_through",
     "One side": "side_one", "Two sides": "side_two", "Symmetric": "side_symmetric",
     "Auto": "op_auto", "Join": "op_join", "Cut": "op_cut", "Intersect": "op_intersect", "New body": "op_newbody",
@@ -477,6 +479,8 @@ class PositionsRow(_ViewportPoints, _Row):
             return
         hit = self.landing(obj, sub, pnt)
         p = hit[0] if hit else App.Vector(*pnt)
+        from kovac import components
+        p = components.path_frame(obj, sub).inverse().multVec(p)      # into the body's own coordinates
         setattr(self.ed.fp, self.prop, list(getattr(self.ed.fp, self.prop)) + [p])
         self.refresh()
 
@@ -857,7 +861,14 @@ class PlaceRow(_ViewportPoints, _Row):
         if not isinstance(f.Surface, Part.Plane):
             return
         p, n, _ = self.landing(obj, sub, pnt or tuple(f.CenterOfMass))
-        setattr(self.ed.fp, self.prop, datum.frame(p, n))
+        from kovac import components
+        if components.root(obj.Document) is not None:   # the new body joins the clicked body's component
+            leaf, _el = components.resolve(obj, sub)
+            comp = components.holder(leaf)
+            self.ed.fp.Home = comp.Name if comp is not None else ""
+            setattr(self.ed.fp, self.prop, components.path_frame(obj, sub).inverse().multiply(datum.frame(p, n)))
+        else:
+            setattr(self.ed.fp, self.prop, datum.frame(p, n))
         self.label.setText("on %s" % obj.Label)
 
 

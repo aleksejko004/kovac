@@ -162,6 +162,62 @@ def resolve(obj, sub):
     return (leaf if leaf is not None else obj), element
 
 
+def selected():
+    """[(leaf object, element, top object, subname)] for the current selection, through
+    components and instances (a whole object selected gives element '')."""
+    import FreeCADGui as Gui
+    out = []
+    for s in Gui.Selection.getSelectionEx("", 0):
+        for sub in s.SubElementNames or [""]:
+            leaf, el = resolve(s.Object, sub)
+            out.append((leaf, el, s.Object, sub))
+    return out
+
+
+def ref_home(doc, values):
+    """The component a new object built on these values belongs in: that of the first body a
+    reference among them points at, of the first object named among them, else the active one."""
+    import json
+    from kovac import model
+    for v in values:
+        for x in (v if isinstance(v, (list, tuple)) else [v]):
+            if isinstance(x, str) and x.startswith("{"):
+                try:
+                    b = model.body_object(doc, json.loads(x).get("b"))
+                except (ValueError, AttributeError):
+                    b = None
+                if b is not None:
+                    return holder(b)
+            elif isinstance(x, str) and x and doc.getObject(x) is not None and hasattr(doc.getObject(x), "getParentGeoFeatureGroup"):
+                return holder(doc.getObject(x))
+    return active(doc)
+
+
+def feature_frame(fp):
+    """Global placement of the coordinates a feature works in (its bodies' component): for
+    drawing its arrows and previews where the model is shown."""
+    if root(fp.Document) is None:
+        return App.Placement()
+    vals = [getattr(fp, p) for p in ("Face", "Edges", "Faces", "Base", "Refs", "ProfileFaces") if hasattr(fp, p)]
+    comp = None
+    ids = list(getattr(fp, "Bodies", []) or []) + [getattr(fp, p) for p in ("Target", "Body") if getattr(fp, p, "")]
+    if ids:
+        from kovac import model
+        b = model.body_object(fp.Document, ids[0])
+        comp = holder(b) if b is not None else None
+    elif any(vals):
+        comp = ref_home(fp.Document, vals)
+    else:
+        comp = home(fp)
+    return comp.getGlobalPlacement() if comp is not None else App.Placement()
+
+
+def adopt(obj, comp):
+    """Put obj into comp (None: leave it at the top)."""
+    if comp is not None and holder(obj) != comp:
+        comp.addObject(obj)
+
+
 def home(fp):
     """The component a feature's new bodies go into: its sketch's, else the one active when it
     was made (stored in ``Home``)."""
@@ -277,3 +333,39 @@ def _bound(comp):
         return s.BoundBox if not s.isNull() else None
     except Exception:
         return None
+
+
+def remove(comp):
+    """Delete a component or an instance. An instance goes with its joints. A component's
+    contents go back to the top of the design (bodies are history results, they stay), its
+    instances and every joint touching it go. Returns a note for the status bar, or ''."""
+    from kovac import joints
+    doc = comp.Document
+    gone = [comp] + ([] if is_instance(comp) else [i for i in instances(comp) if i is not comp])
+    for j in joints.all_joints(doc):
+        try:
+            o1, o2 = joints.origins(j)
+        except Exception:
+            o1 = o2 = None
+        if o1 is None or o1.comp in gone or o2.comp in gone:
+            doc.removeObject(j.Name)
+    for g in joints.grounds(doc):
+        if g.ObjectToGround in gone:
+            doc.removeObject(g.Name)
+    note = ""
+    if not is_instance(comp):
+        if not comp.Placement.isSame(App.Placement(), 1e-9):
+            note = "%s had been moved: its bodies are shown where they were modelled." % comp.Label
+        comp.Group = [k for k in comp.Group if k.TypeId == "App::Origin"]    # the rest go to the top
+    for o in gone:
+        if doc.getObject(o.Name) is not None:
+            if o.TypeId == "App::Part":
+                origin = getattr(o, "Origin", None)
+                doc.removeObject(o.Name)
+                if origin is not None and doc.getObject(origin.Name) is not None:
+                    for f in list(origin.OriginFeatures):
+                        doc.removeObject(f.Name)
+                    doc.removeObject(origin.Name)
+            else:
+                doc.removeObject(o.Name)
+    return note

@@ -123,7 +123,10 @@ class Arrow:
         self.node, self.axis, self.seg = None, self.axis_fn(self.ed.fp), None
         if self.axis is None or Gui.activeView() is None:
             return
+        from kovac import components
+        self.frame = components.feature_frame(self.ed.fp)   # the model's coordinates -> where it is shown
         o, n = self.axis
+        self.axis = o, n = self.frame.multVec(o), self.frame.Rotation.multVec(n)
         it = navigation.install(Gui.activeView())
         self.px = it.px_size() if it is not None else 0.05
         self._draw(self.value(), None)
@@ -154,6 +157,7 @@ class Arrow:
         sits outside the part with its tip on the face, reading as an arrow coming in."""
         try:
             p = o + d.normalize() * max(px * 3, 1e-3)
+            p = getattr(self, "frame", App.Placement()).inverse().multVec(p)
             return any(b.shape.isInside(p, 1e-6, False) for b in model.input_state(self.ed.fp).values())
         except Exception:
             return False

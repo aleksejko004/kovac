@@ -58,6 +58,17 @@ class Triad:
         return self._which()[1]
 
     # drawing -------------------------------------------------------------------
+    def _frame(self):
+        """The target's frame where it is shown: a target in a moved component gives its frame in
+        the component's coordinates and the component's placement as view_frame(). Drag amounts
+        are the same in both (a rigid move), so only drawing and picking convert."""
+        f = self.t.frame()
+        vf = getattr(self.t, "view_frame", None)
+        F = vf() if vf is not None else None
+        if f is None or F is None:
+            return f
+        return F.multVec(f[0]), [F.Rotation.multVec(a) for a in f[1]]
+
     def _px(self):
         it = navigation.install(Gui.activeView()) if Gui.activeView() is not None else None
         return it.px_size() if it is not None else 0.1
@@ -72,7 +83,7 @@ class Triad:
     def redraw(self):
         overlay.remove(self.node)
         from pivy import coin
-        frame = self.t.frame()
+        frame = self._frame()
         if frame is None:
             self.node = None
             return
@@ -114,7 +125,7 @@ class Triad:
         return math.hypot(p.x() - q.x(), p.y() - q.y())
 
     def handle_at(self, it, pos):
-        frame = self.t.frame()
+        frame = self._frame()
         if frame is None:
             return None
         p, axes = frame
@@ -138,7 +149,7 @@ class Triad:
         h = self.handle_at(it, pos)
         if h is None:
             return False
-        p, axes = self.t.frame()
+        p, axes = self._frame()
         start = None
         if h[0] == "r":
             o, d = overlay.ray(it, pos)
@@ -195,7 +206,7 @@ class Triad:
     # the value field ----------------------------------------------------------
     def _tip(self, h):
         """Where the field sits: by the arrow's head, or by the end of the turning handle."""
-        frame = self.t.frame()
+        frame = self._frame()
         if frame is None:
             return None
         p, axes = frame
@@ -309,6 +320,10 @@ class BodyTarget:
             self.pivot_for = tuple(fp.Bodies)
             fp.Pivot = bodies_centre(fp)
         return effective(fp).multVec(fp.Pivot), WORLD
+
+    def view_frame(self):
+        from kovac import components
+        return components.feature_frame(self.ed.fp)
 
     def begin(self, handle=None):
         self.start = App.Placement(self.ed.fp.Move)
@@ -432,6 +447,10 @@ class Session:
     def frame(self):
         return self.target.frame()
 
+    def view_frame(self):
+        vf = getattr(self.target, "view_frame", None)
+        return vf() if vf is not None else None
+
     def handles(self):
         return self.target.handles() if hasattr(self.target, "handles") else None
 
@@ -459,6 +478,44 @@ class Session:
         self.dock.setObjectName("")
         self.dock.close()
         self.dock.deleteLater()
+
+
+class ComponentTarget:
+    """Whole components (and instances): the triad moves their placement -- not a history step
+    (ADR-0004). A jointed one moves only as far as its joints let it (the solver follows)."""
+
+    def __init__(self, comps):
+        self.comps = list(comps)
+        self.doc = self.comps[0].Document
+
+    def frame(self):
+        import Part
+        box = App.BoundBox()
+        for c in self.comps:
+            try:
+                box.add(Part.getShape(c).BoundBox)
+            except Exception:
+                pass
+        return (box.Center if box.isValid() else self.comps[0].Placement.Base), WORLD
+
+    def begin(self, handle=None):
+        self.start = [App.Placement(c.Placement) for c in self.comps]
+        self.centre = self.frame()[0]
+
+    def _apply(self, m):
+        from kovac import joints
+        for c, s in zip(self.comps, self.start):
+            p = m.multiply(s)
+            if joints.all_joints(self.doc) and not joints.drag(self.doc, c, p):
+                continue              # a joint holds it: it stays at the last place that worked
+            if not joints.all_joints(self.doc):
+                c.Placement = p
+
+    def translate(self, i, d):
+        self._apply(App.Placement(WORLD[i] * d, App.Rotation()))
+
+    def rotate(self, i, ang):
+        self._apply(App.Placement(V(), App.Rotation(WORLD[i], ang), self.centre))
 
 
 class PlaneTarget:
@@ -768,6 +825,10 @@ def command():
     if sketchmode.in_sketch() or current_points():
         return points()
     sel = Gui.Selection.getSelectionEx("", 0)
+    from kovac import components
+    whole = [leaf for leaf, el, _t, _s in components.selected() if components.is_component(leaf) and not el]
+    if whole:                     # components picked in the browser: move them
+        return move_components(whole)
     for s in sel:
         if type(getattr(s.Object, "Proxy", None)).__name__ == "DatumPlane" and not getattr(s.Object, "Auto", False):
             return _start(PlaneTarget(s.Object), "Move " + s.Object.Label)
@@ -786,7 +847,7 @@ def command():
 
 
 _picked_faces = []      # the faces picked when Move started, for switching to "Faces" in its panel
-TYPES = ("Bodies", "Faces", "Points")
+TYPES = ("Bodies", "Faces", "Points", "Components")
 
 
 def type_of(fp):
@@ -811,6 +872,8 @@ def switch(source, what):
         source.reject()
     if what == "Points":
         return points()
+    if what == "Components":
+        return move_components(_components_of(bodies))
     if sketchmode.in_sketch():
         sketchmode.finish()
     if what == "Faces":
@@ -822,6 +885,37 @@ def switch(source, what):
     if new.fp.Bodies:
         new.fp.Pivot = bodies_centre(new.fp)
     return new
+
+
+def _components_of(body_ids=()):
+    """Components to move: those selected (in the browser, or whole), else those holding the
+    selected bodies (or the given body ids)."""
+    from kovac import components
+    out = []
+    for leaf, _el, top, sub in components.selected():
+        c = None
+        if components.is_component(leaf):
+            c = leaf
+        elif components.is_root(top) and sub:
+            c = top.Document.getObject(sub.split(".")[0])    # the instance the click went through
+        else:
+            c = components.holder(leaf)
+        if c is not None and components.is_component(c) and c not in out:
+            out.append(c)
+    doc = App.ActiveDocument
+    for bid in body_ids:
+        b = model.body_object(doc, bid) if doc else None
+        c = components.holder(b) if b is not None else None
+        if c is not None and c not in out:
+            out.append(c)
+    return out
+
+
+def move_components(comps):
+    if not comps:
+        raise ValueError("Select a component (or a body in one) to move.")
+    names = ", ".join(c.Label for c in comps[:3]) + ("…" if len(comps) > 3 else "")
+    return _start(ComponentTarget(comps), "Move " + names, move_type="Components")
 
 
 def _transform():

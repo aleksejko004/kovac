@@ -26,6 +26,7 @@ GROUPS = {
                           ["Kovac_Combine", "Kovac_Split"], ["Kovac_Scale", "Kovac_Mirror"],
                           ["Kovac_PatternRect", "Kovac_PatternCirc"]]),
                ("Reference", [["Kovac_Plane", "Kovac_Axis", "Kovac_Point"]]),
+               ("Assemble", [["Kovac_NewComponent", "Kovac_NewInstance"], "Kovac_Joint", "Kovac_DragComponent", "Kovac_Ground"]),
                ("Check", ["Kovac_Measure", ["Kovac_MassProperties", "Kovac_Interference", "Kovac_Section", "Kovac_DraftAnalysis"]]),
                ("Model", ["Kovac_Parameters", "Kovac_Material"]),
                ("Bring in", [["Kovac_ImportStep", "Kovac_ExportStep"]]),
@@ -231,6 +232,8 @@ def about():
 def register():
     from kovac import design, drawmode, inspect_tools, params
     design.register()
+    from kovac import assemble
+    assemble.register()
     drawmode.register()
     inspect_tools.register()
     params.register()
