@@ -1,6 +1,6 @@
 # Bodies, components and assemblies — plan (proposal, 2026-10-12)
 
-Status: **proposal, awaiting owner decisions** (see "Decisions needed"). Nothing here is built yet.
+Status: **proposal**; owner decisions 1 and 2 accepted 2026-10-12, 3 open (see "Decisions needed"). Nothing here is built yet.
 
 Sources, per the clean-room rules: FreeCAD 1.1.4's Assembly workbench and its bundled solver
 (OndselSolver, both LGPL, already inside the build Kovač runs on), classical kinematics (the lower
@@ -96,12 +96,46 @@ then a stop for owner review.
 
 ## Decisions needed (owner)
 
-1. **One file or many by default?** Proposal: components live in the same design by default
+1. **One file or many by default?** *Accepted.* Proposal: components live in the same design by default
    (simplest to start, one history); external components (step 5) for parts reused across designs.
-2. **Are joint-driven positions part of the history?** Proposal: no. Positions are assembly state
+2. **Are joint-driven positions part of the history?** *Accepted.* Proposal: no. Positions are assembly state
    (moving a hinged lid shouldn't add a timeline step); creating or editing a joint is.
 3. **Where does this go in the milestones?** The README lists "drawings, assemblies" as M3.
    Proposal: finish M3 drawings first, then run these steps as M4, unless assemblies come first.
+
+## How joints survive changes to the bodies
+
+A joint never stores coordinates or FreeCAD element names as its truth. Each joint origin stores:
+
+- a **Kovač reference** (ADR-0003, `{"b","k","t","s"}`) to the face, edge or vertex it was snapped to;
+- the **snap kind**: face centre, circle/arc centre, edge midpoint, vertex, axis of a cylinder;
+- an optional **offset and rotation** relative to that frame (the panel's Distance / Angle / flip).
+
+At every regeneration, before the solve:
+
+1. Resolve the reference (`topo`): the tag (`Hole002:wall:0`, `Extrude003:s:g2`, …) finds today's
+   face whatever its index is now.
+2. Rebuild the frame from today's geometry and the snap kind: the hole's axis and centre *now*,
+   the face's normal *now*. The in-plane direction comes from the geometry too (a straight edge of
+   the face, or the body's axes), so it doesn't spin when the part changes.
+3. Write the result into FreeCAD's joint (Reference = today's `Face6`, Placement = the frame).
+   FreeCAD's names become a cache, rewritten every time, never read back.
+4. Solve.
+
+So a hole grown from 10 to 12 mm, a plate made thicker, a feature inserted upstream, or faces
+renumbered all keep the joint, and the joint follows the geometry (the pin stays in the hole's new
+centre). If the reference can't be resolved (`topo.Broken`: the face was deleted, or a pattern lost
+the instance), the joint goes red in the browser with "Missing reference: edit the joint and pick
+it again". The component stays where it was last solved instead of jumping. It is never a silent
+guess.
+
+References live in body coordinates; the component's placement is applied after. A joint moving a
+component therefore doesn't disturb its own references. Step 7 extends the same rule to
+in-context references.
+
+Tests: the torture suite (`tests/test_torture.py`) gets a joint variant of each scenario. Every
+edit runs on a jointed pair, then checks that the joint resolves to the same tag and that the
+solved position matches the expected one.
 
 ## Main risk
 
