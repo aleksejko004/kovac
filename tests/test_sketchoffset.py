@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """Sketch offset for curves the sketcher's own Offset cannot hold (B-splines, ellipses)."""
+import math
 import unittest
 
 import FreeCAD as App
@@ -55,6 +56,41 @@ class SketchOffsetTests(unittest.TestCase):
             self.assertLess(worst, 1e-3)
         kinds = [type(g).__name__ for g in sketchoffset.offset([ln, s], 2) + sketchoffset.offset([ln, s], -2)]
         self.assertIn("ArcOfCircle", kinds)       # the outside corner is rounded on one of the sides
+
+    def rect(self):
+        c = [V(0, 0, 0), V(40, 0, 0), V(40, 20, 0), V(0, 20, 0)]
+        return [Part.LineSegment(c[k], c[(k + 1) % 4]) for k in range(4)]
+
+    def test_sharp_corners_keep_a_rectangle_a_rectangle(self):
+        for d in (3, -3):                         # either side: one is the outside
+            out = sketchoffset.offset(self.rect(), d, "Sharp corners")
+            self.assertTrue(all(isinstance(g, Part.LineSegment) for g in out))
+            self.assertEqual(len(out), 4)
+            bb = Part.Wire(Part.__sortEdges__([g.toShape() for g in out])).BoundBox
+            grown = abs(bb.XLength - 40) - 6
+            self.assertLess(abs(grown), 1e-6, (bb.XLength, bb.YLength))
+            self.assertLess(abs(abs(bb.YLength - 20) - 6), 1e-6)
+        rounded = sketchoffset.offset(self.rect(), 3) + sketchoffset.offset(self.rect(), -3)
+        self.assertEqual(sum(isinstance(g, Part.ArcOfCircle) for g in rounded), 4)   # round: the outside one has 4 arcs
+
+    def test_sharp_corners_on_a_spline_chain_meet_without_arcs(self):
+        ln = Part.LineSegment(V(-20, 0, 0), V(0, 0, 0))
+        s = spline(V(0, 0, 0), V(5, 10, 0), V(15, 15, 0), V(25, 15, 0))
+        for d in (2, -2):
+            out = sketchoffset.offset([ln, s], d, "Sharp corners")
+            self.assertFalse(any(isinstance(g, Part.ArcOfCircle) for g in out))
+            w = Part.Wire(Part.__sortEdges__([g.toShape() for g in out]))
+            self.assertEqual(len(w.Edges), len(out), "pieces join end to end")
+            self.assertTrue(any(isinstance(g, Part.BSplineCurve) and gap(g, s, 2) < 1e-3 for g in out))
+
+    def test_sharp_corners_on_arcs_extend_the_arc(self):
+        a = Part.ArcOfCircle(Part.Circle(V(0, 0, 0), V(0, 0, 1), 10), 0, math.pi / 2)        # (10,0) -> (0,10)
+        ln = Part.LineSegment(V(0, 10, 0), V(-20, 10, 0))                                    # a corner at (0,10)
+        for d in (2, -2):
+            out = sketchoffset.offset([a, ln], d, "Sharp corners")
+            self.assertEqual(len(out), 2)
+            w = Part.Wire(Part.__sortEdges__([g.toShape() for g in out]))
+            self.assertEqual(len(w.Edges), 2)
 
     def test_added_to_a_sketch_with_joins_coincident(self):
         doc = App.newDocument("OffsetT")

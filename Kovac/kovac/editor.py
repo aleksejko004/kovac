@@ -96,6 +96,7 @@ CHOICE_ICONS = {
     "One side": "side_one", "Two sides": "side_two", "Symmetric": "side_symmetric",
     "Auto": "op_auto", "Join": "op_join", "Cut": "op_cut", "Intersect": "op_intersect", "New body": "op_newbody",
     "Simple": "hole_simple", "Counterbore": "hole_counterbore", "Countersink": "hole_countersink", "Tapped": "hole_tapped",
+    "Round corners": "offset_round", "Sharp corners": "offset_sharp",
     "Box": "box", "Cylinder": "cylinder", "Sphere": "sphere", "Cone": "cone", "Torus": "torus",
 }
 

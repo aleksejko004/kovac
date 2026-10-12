@@ -779,6 +779,22 @@ def offset(g):
     g.poly(_rect2((4, 4.5), (20, 19.5)), stroke=g.t["accent"], width=STROKE)
 
 
+def offset_round(g):
+    """Offset corner choice: the outer copy's corners rounded (arc join)."""
+    g.poly(_rect2((8.5, 9), (15.5, 15)), stroke=g.t["icon_line"], width=STROKE)
+    r, (x0, y0, x1, y1) = 4.5, (4, 4.5, 20, 19.5)
+    pts = (_arc2((x1 - r, y0 + r), r, 0, 90, 6) + _arc2((x0 + r, y0 + r), r, 90, 180, 6)
+           + _arc2((x0 + r, y1 - r), r, 180, 270, 6) + _arc2((x1 - r, y1 - r), r, 270, 360, 6))
+    g.poly(pts, stroke=g.t["accent"], width=STROKE)
+
+
+def offset_sharp(g):
+    """Offset corner choice: the outer copy's sides extended until they meet (intersection join)."""
+    g.poly(_rect2((8.5, 9), (15.5, 15)), stroke=g.t["icon_line"], width=STROKE)
+    g.poly(_rect2((4, 4.5), (20, 19.5)), stroke=g.t["accent"], width=STROKE)
+    g.handle((20, 4.5))
+
+
 def sk_mirror(g):
     g.line((12, 3), (12, 21), g.t["icon_line"], HAIR, dash="2,1.5")
     g.poly([(4, 17), (10, 17), (10, 7)], stroke=g.t["icon_line"], width=STROKE)
@@ -1226,7 +1242,7 @@ ICONS = {
     "arc": (arc, "sketch"), "arc3": (arc3, "sketch"), "polygon": (polygon, "sketch"), "slot": (slot, "sketch"),
     "ellipse": (ellipse, "sketch"), "spline": (spline, "sketch"), "spoint": (spoint, "sketch"), "sk_fillet": (sk_fillet, "sketch"),
     "sk_chamfer": (sk_chamfer, "sketch"), "trim": (trim, "sketch"), "extend": (extend, "sketch"), "sk_split": (sk_split, "sketch"),
-    "offset": (offset, "sketch"), "sk_mirror": (sk_mirror, "sketch"), "sk_move": (sk_move, "sketch"), "sk_rotate": (sk_rotate, "sketch"),
+    "offset": (offset, "sketch"), "offset_round": (offset_round, "sketch"), "offset_sharp": (offset_sharp, "sketch"), "sk_mirror": (sk_mirror, "sketch"), "sk_move": (sk_move, "sketch"), "sk_rotate": (sk_rotate, "sketch"),
     "sk_scale": (sk_scale, "sketch"), "sk_array": (sk_array, "sketch"), "construction": (construction, "sketch"), "project": (project, "sketch"),
     "carbon": (carbon, "sketch"), "sk_look": (sk_look, "sketch"), "sk_section": (sk_section, "sketch"), "dimension": (dimension, "sketch"),
     "c_coincident": (c_coincident, "sketch"), "c_pointon": (c_pointon, "sketch"), "c_midpoint": (c_midpoint, "sketch"),

@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Offset in a sketch, for curves the sketcher's own Offset leaves out.
+"""Offset in a sketch: lines, arcs, circles, B-splines and ellipses.
 
-The sketcher's Offset hands back OpenCascade offset curves, which a sketch cannot hold, for
+The sketcher's own Offset hands back OpenCascade offset curves, which a sketch cannot hold, for
 B-splines and ellipses -- and then adds nothing. Here each picked curve is offset on its own:
 a line stays a line and an arc an arc (exact), anything else becomes a cubic B-spline fitted
 to its true offset. Picked curves that join end to end are offset as one chain on the same
 side: where neighbours' offsets now overlap (an inside corner) both are trimmed to where they
-cross, where they part (an outside corner) a round corner about the old point closes the gap.
-A selection of only lines, arcs and circles goes to the sketcher's own Offset, as before.
+cross. Where they part (an outside corner) the panel's corner choice decides: round corners
+(an arc about the old point, so every point is exactly the distance away) or sharp corners
+(both carried on until they meet: lines and curves moved parallel, the corner kept).
 With nothing selected the panel opens and waits: the curves clicked next are offset.
 """
 import math
@@ -23,7 +24,6 @@ V = App.Vector
 Z = V(0, 0, 1)
 TOL = 1e-6
 ARROW_PX, HIT_PX = 130, 14
-NATIVE = (Part.LineSegment, Part.ArcOfCircle, Part.Circle)
 
 
 # ---------------------------------------------------------------- geometry (sketch plane, z = 0)
@@ -101,6 +101,13 @@ def _trim(g, rev, at_end, p):
         s, e = g.StartPoint, g.EndPoint
         return Part.LineSegment(s, p) if cut_last else Part.LineSegment(p, e)
     if isinstance(g, Part.ArcOfCircle):
+        lo, hi = g.FirstParameter, g.LastParameter
+        if cut_last:                    # extending past the end: the angle can come back wrapped below it
+            while b < lo:
+                b += 2 * math.pi
+        else:
+            while a > hi:
+                a -= 2 * math.pi
         return Part.ArcOfCircle(g.Circle, a, b)
     g = g.copy()
     g.segment(a, b)
@@ -119,9 +126,50 @@ def _round(centre, p, q, r):
     return Part.ArcOfCircle(Part.Circle(centre, Z, r), a1, a2)
 
 
-def offset(geos, d):
+def _extension(g, rev, at_end):
+    """The curve g carries on as past one chain end: a line's line, an arc's circle, anything
+    else straight on along its end tangent."""
+    if isinstance(g, Part.LineSegment):
+        return Part.Line(g.StartPoint, g.EndPoint)
+    if isinstance(g, Part.ArcOfCircle):
+        return g.Circle
+    u = g.LastParameter if at_end != rev else g.FirstParameter
+    p = g.value(u)
+    return Part.Line(p, p + g.tangent(u)[0])
+
+
+def _meet(gi, ri, gj, rj, corner, d):
+    """Sharp corner: where the two offsets meet once carried on past their ends -- the crossing
+    nearest the old corner, or None (they never meet, or only absurdly far out)."""
+    try:
+        pts = _extension(gi, ri, True).intersectCC(_extension(gj, rj, False), TOL)
+    except Exception:
+        return None
+    pts = [V(q.X, q.Y, q.Z) if hasattr(q, "X") else V(q) for q in pts]
+    if not pts:
+        return None
+    x = min(pts, key=lambda q: (q - corner).Length)
+    return x if (x - corner).Length < abs(d) * 50 else None
+
+
+def _reach(g, rev, at_end, x):
+    """g carried on to x at one chain end: a line or arc lengthened in place; any other curve
+    keeps its shape and gets a straight piece on to x. Returns (g, piece or None)."""
+    if isinstance(g, (Part.LineSegment, Part.ArcOfCircle)):
+        return _trim(g, rev, at_end, x), None
+    s, e = _ends(g, rev)
+    return g, (Part.LineSegment(e, x) if at_end else Part.LineSegment(x, s))
+
+
+CORNERS = ("Round corners", "Sharp corners")
+
+
+def offset(geos, d, corners="Round corners"):
     """New geometry for the picked curves offset by d (sketch coordinates). d > 0 is to the left
-    of each chain's direction; the caller picks the side by the sign."""
+    of each chain's direction; the caller picks the side by the sign. Where the offsets part at
+    an outside corner, "Round corners" closes the gap with an arc about the old corner (every
+    point of the result exactly d from the original); "Sharp corners" carries both neighbours
+    on until they meet, as lines and curves moved parallel."""
     out = []
     for items, closed in _chains(geos):
         res = []
@@ -144,10 +192,17 @@ def offset(geos, d):
                 x = min((pp[0] for pp in pairs), key=lambda q: (q - corner).Length)
                 res[i][0] = _trim(gi, ri, True, x)
                 res[j][0] = _trim(res[j][0], rj, False, x)
-            else:                               # outside corner: round it about the old point
-                fills.append((i, _round(corner, pe, ps, abs(d))))
-        for i, arc in reversed(fills):
-            res.insert(i + 1, [arc, False])
+            else:                               # outside corner
+                x = _meet(gi, ri, gj, rj, corner, d) if corners == "Sharp corners" else None
+                if x is None:                   # round it about the old point
+                    fills.append((i, [_round(corner, pe, ps, abs(d))]))
+                    continue
+                res[i][0], pi = _reach(gi, ri, True, x)
+                res[j][0], pj = _reach(res[j][0], rj, False, x)
+                fills.append((i, [q for q in (pi, pj) if q is not None]))
+        for i, pieces in reversed(fills):
+            for k, q in enumerate(pieces):
+                res.insert(i + 1 + k, [q, False])
         out += [g for g, _ in res]
     return out
 
@@ -273,6 +328,11 @@ class Tool:
         self.field.editingFinished.connect(self.typed)
         row.addWidget(self.field, 1)
         lay.addLayout(row)
+        from kovac.editor import IconChoice
+        self.corners = IconChoice(CORNERS, _last["corners"])
+        self.corners.setObjectName("kovacOffsetCorners")
+        self.corners.currentTextChanged.connect(self._corners)
+        lay.addWidget(self.corners)
         flip = QtWidgets.QPushButton("Other side")
         flip.clicked.connect(lambda: self.set(-self.d))
         lay.addWidget(flip)
@@ -325,7 +385,7 @@ class Tool:
             self.status.setText("Click the curves to offset (Ctrl adds more).")
         else:
             try:
-                self.result = offset(self.geos, d)
+                self.result = offset(self.geos, d, _last["corners"])
                 self.status.setText("")
             except Exception as e:
                 self.result = None
@@ -333,6 +393,11 @@ class Tool:
         if self.arrow is not None:
             self.arrow.draw()
         self.draw_preview()
+
+    def _corners(self, which):
+        _last["corners"] = which
+        if self.arrow is not None or self.geos:
+            self.set(self.d)
 
     def typed(self):
         try:
@@ -399,6 +464,7 @@ class Tool:
         self.dock.deleteLater()
         if _tool is self:
             _tool = None
+_last = {"corners": CORNERS[0]}      # the corner choice carries over to the next offset
 
 
 _tool = None
@@ -414,9 +480,6 @@ def command():
     sketchtools.end_running()
     sk = Gui.ActiveDocument.getInEdit().Object
     picks = _picks(sk)              # nothing picked yet: the panel opens and waits for the clicks
-    if picks and all(isinstance(sk.Geometry[k], NATIVE) for k in picks):
-        Gui.runCommand("Sketcher_Offset")   # lines, arcs and circles: the sketcher's own does them well
-        return
     if _tool is not None:
         _tool.close()
     _tool = Tool(sk, picks)

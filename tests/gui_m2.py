@@ -1135,6 +1135,9 @@ def seg_offset():
                                                                  QtCore.Qt.NoModifier))
     yield 200
     check("dragging the offset arrow inside the sketch changes the distance", tool.d > d0 + 3, (d0, tool.d))
+    corners = tool.dock.widget().findChild(QtWidgets.QWidget, "kovacOffsetCorners")
+    check("the offset panel offers round or sharp corners", corners is not None and
+          list(corners.buttons) == ["Round corners", "Sharp corners"], corners and list(corners.buttons))
     tool.field.setText("4 mm")
     tool.field.returnPressed.emit()
     yield 400
@@ -1145,6 +1148,33 @@ def seg_offset():
     check("typing 4 mm and Enter adds the offset spline 4 mm away, one undo step",
           sketchoffset._tool is None and len(new) == 1 and err < 1e-3 and App.ActiveDocument.UndoNames[:1] == ["Offset"],
           (len(new), err, App.ActiveDocument.UndoNames[:2]))
+    # sharp corners on a rectangle's outline: four longer lines, no arcs
+    Gui.Selection.clearSelection()
+    r0 = len(sk.Geometry)
+    c = [V(60, 0, 0), V(100, 0, 0), V(100, 20, 0), V(60, 20, 0)]
+    for k in range(4):
+        sk.addGeometry(Part.LineSegment(c[k], c[(k + 1) % 4]))
+    App.ActiveDocument.recompute()
+    yield 300
+    for k in range(4):
+        Gui.Selection.addSelection(sk, "Edge%d" % (r0 + k + 1))
+    command("Kovac_SketchOffset")
+    yield 400
+    tool = sketchoffset._tool
+    tool.dock.widget().findChild(QtWidgets.QWidget, "kovacOffsetCorners").setCurrentText("Sharp corners")
+    tool.set(abs(tool.d) if tool.d else 2)
+    if tool.result and any(isinstance(x, Part.LineSegment) and max(x.StartPoint.x, x.EndPoint.x) < 100 + 1e-9
+                           and min(x.StartPoint.x, x.EndPoint.x) > 60 - 1e-9 and abs(x.StartPoint.y - x.EndPoint.y) < 1e-9
+                           and x.StartPoint.y > 0 and x.StartPoint.y < 20 for x in tool.result):
+        tool.set(-tool.d)                       # it went inside: take the outside
+    tool.field.setText("3 mm" if tool.d > 0 else "-3 mm")
+    tool.field.returnPressed.emit()
+    yield 400
+    added = sk.Geometry[r0 + 4:]
+    bb = Part.Compound([x.toShape() for x in added]).BoundBox if added else None
+    check("sharp corners: a rectangle offsets to a larger rectangle of four lines, no rounded corners",
+          len(added) == 4 and all(isinstance(x, Part.LineSegment) for x in added) and bb and
+          abs(bb.XLength - 46) < 1e-6 and abs(bb.YLength - 26) < 1e-6, (len(added), bb))
     sketchmode.finish()
     yield 300
 
