@@ -103,7 +103,9 @@ def sample_points(face, n=1):
     if not tris:
         return [face.CenterOfMass]
     ranked = sorted(tris, key=lambda t: -((pts[t[1]] - pts[t[0]]).cross(pts[t[2]] - pts[t[0]])).Length)
-    return [(pts[a] + pts[b] + pts[c]) * (1.0 / 3) for a, b, c in ranked[:n]]
+    # a triangle's centroid sits off a curved surface (inside a hole's wall): put it back on
+    s = face.Surface
+    return [s.value(*s.parameter((pts[a] + pts[b] + pts[c]) * (1.0 / 3))) for a, b, c in ranked[:n]]
 
 
 def on_face(face, p, tol=TOL):
