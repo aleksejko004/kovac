@@ -1091,14 +1091,31 @@ def seg_offset():
     yield 500
     n0 = len(sk.Geometry)
     Gui.Selection.clearSelection()
-    command("Kovac_SketchOffset")              # nothing picked: it opens and waits for the curve
-    yield 300
-    waiting = sketchoffset._tool
-    check("Offset with nothing selected opens and waits for a curve",
-          waiting is not None and waiting.result is None and "Click" in waiting.status.text(), waiting)
-    Gui.Selection.addSelection(sk, "Edge%d" % (g + 1))
+    from kovac import sketchtools
+    views.go(view(), views.view_rotation((0, 0, 1)), fit=True)
+    yield 600
+    Gui.runCommand("Sketcher_CreateBSpline")   # the user's case: a drawing tool still on from the last curve
     yield 400
+    was_running = sketchtools.tool_running()
+    command("Kovac_SketchOffset")              # nothing picked: it opens and waits for the curve
+    yield 400
+    waiting = sketchoffset._tool
+    check("Offset ends the drawing tool still running, then opens and waits for a curve",
+          was_running and not sketchtools.tool_running() and waiting is not None and waiting.result is None
+          and "Click" in waiting.status.text(), (was_running, sketchtools.tool_running(), waiting))
+    curve = sk.Geometry[g]
+    on = to_qt(curve.value((curve.FirstParameter + curve.LastParameter) * 0.3))
+    for k in (6, 3, 0):                        # hover in, so the sketcher preselects the curve, then click
+        mouse(QtCore.QEvent.MouseMove, on + QtCore.QPoint(k, 0))
+        yield 80
+    mouse(QtCore.QEvent.MouseButtonPress, on, QtCore.Qt.LeftButton, QtCore.Qt.LeftButton)
+    mouse(QtCore.QEvent.MouseButtonRelease, on, QtCore.Qt.LeftButton, QtCore.Qt.NoButton)
+    yield 500
     tool = sketchoffset._tool
+    check("clicking the curve picks it for the offset (no pole added by a leftover tool)",
+          tool is not None and tool.picks == [g] and len(sk.Geometry) == n0, (tool and tool.picks, len(sk.Geometry), n0))
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 400
     check("Offset on a B-spline opens Kovač's offset with a live preview",
           tool is not None and tool.result and isinstance(tool.result[0], Part.BSplineCurve) and tool.preview_node is not None,
           tool and tool.result)

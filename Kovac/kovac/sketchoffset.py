@@ -177,7 +177,7 @@ def add_to(sk, geos):
 
 def _picks(sk):
     out = []
-    for s in Gui.Selection.getSelectionEx("", 0):
+    for s in Gui.Selection.getSelectionEx("", 1):   # resolved names: a click in a sketch gives ';g1.edge1' unresolved
         if s.Object is not sk:
             continue
         for sub in s.SubElementNames:
@@ -410,6 +410,8 @@ def command():
     if not sketchmode.in_sketch():
         commands.report("Offset works inside a sketch: select its curves first.")
         return
+    from kovac import sketchtools
+    sketchtools.end_running()
     sk = Gui.ActiveDocument.getInEdit().Object
     picks = _picks(sk)              # nothing picked yet: the panel opens and waits for the clicks
     if picks and all(isinstance(sk.Geometry[k], NATIVE) for k in picks):

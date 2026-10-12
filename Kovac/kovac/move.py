@@ -710,7 +710,7 @@ def current_points():
         sk = Gui.ActiveDocument.getInEdit().Object
         picks = sketch_picks(sk)
         return (sk, picks) if picks else None
-    for s in Gui.Selection.getSelectionEx("", 0):
+    for s in Gui.Selection.getSelectionEx("", 1):   # resolved names: a click in a sketch gives ';g1.edge1' unresolved
         if s.Object.TypeId.startswith("Sketcher::SketchObject"):
             picks = shape_picks(s.Object, s.SubElementNames)
             if picks:
@@ -719,6 +719,9 @@ def current_points():
 
 
 def points():
+    from kovac import sketchmode, sketchtools
+    if sketchmode.in_sketch():
+        sketchtools.end_running()
     return _start(PointsTarget(), "Move sketch points", move_type="Points")
 
 
@@ -746,7 +749,7 @@ def _start(target, title, **triad):
 def sketch_picks(sk):
     """The selected sketch elements as (geo index, point pos)."""
     out = []
-    for s in Gui.Selection.getSelectionEx("", 0):
+    for s in Gui.Selection.getSelectionEx("", 1):   # resolved names: a click in a sketch gives ';g1.edge1' unresolved
         if s.Object is not sk:
             continue
         for sub in s.SubElementNames:

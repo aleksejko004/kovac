@@ -62,6 +62,14 @@ def tool_running():
                                      and w.isVisibleTo(tasks) for w in tasks.findChildren(QtWidgets.QWidget))
 
 
+def end_running():
+    """Our own tools (Offset, Move) end the sketcher tool still running: drawing tools stay on
+    after each shape, and left running it would keep taking the clicks meant for picking."""
+    if tool_running():
+        Gui.runCommand("Sketcher_StopOperation")
+    stop()
+
+
 def stop():
     """Another tool was picked (or the tool ended): our variants end."""
     _state.update(chain=False, around=False, idle=0)
