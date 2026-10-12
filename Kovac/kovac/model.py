@@ -30,12 +30,13 @@ class Feature:
 
     def __init__(self, fp):
         fp.Proxy = self
-        fp.addProperty("App::PropertyLink", "Previous", "Kovac", "feature before this one in the history", 4)
+        fp.addProperty("App::PropertyLinkGlobal", "Previous", "Kovac", "feature before this one in the history", 4)
         fp.addProperty("App::PropertyBool", "Suppressed", "Kovac", "skip this feature")
         # attribute bits: 1 read-only, 4 hidden, 8 output (setting it in execute doesn't re-touch)
         fp.addProperty("App::PropertyString", "Status", "Kovac", "empty when healthy", 9)
         fp.addProperty("App::PropertyString", "BodyState", "Kovac", "tag table of the output state", 12)
         fp.addProperty("App::PropertyString", "Kind", "Kovac", "", 1).Kind = self.kind
+        fp.addProperty("App::PropertyString", "Home", "Kovac", "component active when it was made", 4)
         self.setup(fp)
 
     def setup(self, fp):
@@ -75,7 +76,7 @@ class BodyProxy:
     def __init__(self, fp):
         fp.Proxy = self
         fp.addProperty("App::PropertyString", "BodyId", "Kovac", "", 1)
-        fp.addProperty("App::PropertyLink", "Tip", "Kovac", "", 4)
+        fp.addProperty("App::PropertyLinkGlobal", "Tip", "Kovac", "", 4)
         fp.addProperty("App::PropertyString", "Material", "Kovac", "material key (kovac.materials)")
 
     def execute(self, fp):
@@ -92,7 +93,7 @@ class BodyProxy:
 class HistoryProxy:
     def __init__(self, fp):
         fp.Proxy = self
-        fp.addProperty("App::PropertyLinkList", "Features", "Kovac", "ordered history", 4)
+        fp.addProperty("App::PropertyLinkListGlobal", "Features", "Kovac", "ordered history", 4)
         fp.addProperty("App::PropertyInteger", "Rollback", "Kovac", "active features (-1 = all)").Rollback = -1
 
     def execute(self, fp):
@@ -233,6 +234,10 @@ def create(doc, proxy, name=None, index=None, **props):
     """Add a feature at the rollback marker (or index) and set its properties."""
     fp = doc.addObject("Part::FeaturePython", name or proxy.kind)
     proxy(fp)
+    from kovac import components
+    act = components.active(doc)
+    if act is not None:
+        fp.Home = act.Name
     if App.GuiUp and fp.ViewObject is not None:
         ViewProvider(fp.ViewObject, proxy.icon)
         if proxy.state_feature:
@@ -333,6 +338,11 @@ def sync_bodies(doc, prune=False):
             b.BodyId, b.Tip = i, t
             b.Label = "Body %d" % (len(have) + 1)
             have[i] = b
+            from kovac import components
+            maker = doc.getObject(i.split(".")[0])
+            comp = components.home(maker) if maker is not None else None
+            if comp is not None:          # a new body joins the component its feature works in
+                comp.addObject(b)
     if prune:
         for i, b in list(have.items()):
             if i not in seen and all(i not in (o.BodyState or "") for o in items(doc) if is_feature(o)):
@@ -342,28 +352,33 @@ def sync_bodies(doc, prune=False):
 
 
 def commit(doc):
-    """Recompute, create any bodies the history produced, recompute those (cheap if none)."""
+    """Recompute, create any bodies the history produced, recompute those (cheap if none);
+    then joints follow today's geometry (ADR-0004). Returns what the joints reported."""
     doc.recompute()
     sync_bodies(doc)
     relink(doc)
     doc.recompute()
+    from kovac import joints
+    return joints.update(doc)
 
 
 # ---------------------------------------------------------------- operations (Join/Cut/...)
 
-def _touching(state, tool):
+def _touching(state, tool, scope=None):
     out = []
     for bid, b in state.items():
+        if scope is not None and bid not in scope:
+            continue
         if b.shape.BoundBox.intersect(tool.shape.BoundBox) and b.shape.distToShape(tool.shape)[0] < 1e-7:
             out.append(bid)
     return out
 
 
-def infer(state, tool, hint=None):
+def infer(state, tool, hint=None, scope=None):
     """Operation from context (brief §3.6): touching nothing -> New body; a profile on a body
     face pulled outward -> Join, pushed inward -> Cut (so dragging back through zero flips
     Join <-> Cut); without such a face, mostly inside material -> Cut, else Join."""
-    touching = _touching(state, tool)
+    touching = _touching(state, tool, scope)
     if not touching:
         return "New body", []
     if hint in ("Join", "Cut"):
@@ -405,12 +420,13 @@ def apply_tool(fp, state, tool, hint=None):
     Sets fp.ResolvedOperation for the panel ("Join (auto)")."""
     op = fp.Operation
     targets = list(fp.Targets)
+    scope = in_scope(fp, state)
     if op == "Auto":
-        op, auto_targets = infer(state, tool, hint)
+        op, auto_targets = infer(state, tool, hint, scope)
         targets = targets or auto_targets
         resolved = "%s (auto)" % op
     else:
-        targets = targets or _touching(state, tool)
+        targets = targets or _touching(state, tool, scope)
         resolved = op
     if fp.ResolvedOperation != resolved:
         fp.ResolvedOperation = resolved
@@ -441,6 +457,17 @@ def apply_tool(fp, state, tool, hint=None):
     return state
 
 
+def in_scope(fp, state):
+    """Body ids a feature's tool may combine with: those in the component it works in (shapes
+    of other components are in other coordinates, ADR-0004). None = no components, all."""
+    from kovac import components
+    if components.root(fp.Document) is None:
+        return None
+    home = components.home(fp)
+    holders = {b.BodyId: components.holder(b) for b in bodies(fp.Document)}
+    return {i for i in state if holders.get(i, home) == home}
+
+
 def new_body_id(fp, k=None):
     return fp.Name if k is None else "%s.%d" % (fp.Name, k)
 
@@ -458,10 +485,14 @@ def refs(fp, prop):
 
 
 def pick_ref(obj, sub):
-    """Reference (JSON) for a viewport pick on a Kovač body, or None for anything else."""
-    if not isinstance(getattr(obj, "Proxy", None), BodyProxy) or not sub:
+    """Reference (JSON) for a viewport pick on a Kovač body, or None for anything else. The pick
+    may go through components and instances ('Assembly', 'Pin.Body.Face3')."""
+    from kovac import components
+    if not sub:
         return None
-    element = sub.split(".")[-1]
+    obj, element = components.resolve(obj, sub)
+    if not isinstance(getattr(obj, "Proxy", None), BodyProxy):
+        return None
     if not element[:4] in ("Face", "Edge") and not element.startswith("Vertex"):
         return None
     return topo.dumps(topo.make_ref(state_of(obj.Tip), obj.BodyId, element))

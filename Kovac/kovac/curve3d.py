@@ -108,12 +108,16 @@ def from_sketch(sk, indices=None):
     indices = free_splines(sk) if indices is None else indices
     if not indices:
         return []
-    pl = sk.getGlobalPlacement()
+    from kovac import components
+    pl = components.local_placement(sk)          # the curve joins the sketch's component
+    home = components.holder(sk)
     made = []
     with commands.transaction("3D curve", doc):
         for i in indices:
             g = sk.Geometry[i]
             made.append(from_geometry(doc, g, pl))
+            if home is not None:
+                home.addObject(made[-1])
         helpers = [k for k, c in enumerate(sk.Constraints) if c.Type == "InternalAlignment" and c.Second in indices]
         drop = sorted({sk.Constraints[k].First for k in helpers} | set(indices), reverse=True)
         for k in drop:

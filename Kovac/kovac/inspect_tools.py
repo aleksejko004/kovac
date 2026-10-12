@@ -100,7 +100,7 @@ class SectionProxy:
         fp.addProperty("App::PropertyString", "Plane", "Section", "XY/XZ/YZ, a plane, or a flat face").Plane = "XZ"
         fp.addProperty("App::PropertyDistance", "Offset", "Section", "")
         fp.addProperty("App::PropertyBool", "Flip", "Section", "keep the other side")
-        fp.addProperty("App::PropertyLinkList", "Bodies", "Section", "", 4)
+        fp.addProperty("App::PropertyLinkListGlobal", "Bodies", "Section", "", 4)
 
     def execute(self, fp):
         from kovac import modify

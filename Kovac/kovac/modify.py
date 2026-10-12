@@ -665,7 +665,7 @@ class Pattern(model.Feature):
     kind, icon = "Pattern", "pattern"
 
     def setup(self, fp):
-        fp.addProperty("App::PropertyLinkList", "Sources", "Pattern", "features to repeat")
+        fp.addProperty("App::PropertyLinkListGlobal", "Sources", "Pattern", "features to repeat")
         fp.addProperty("App::PropertyStringList", "Bodies", "Pattern", "or: body ids to repeat")
         fp.addProperty("App::PropertyEnumeration", "Type", "Pattern", "")
         fp.Type = ["Rectangular", "Circular", "Path"]
@@ -679,7 +679,7 @@ class Pattern(model.Feature):
         fp.addProperty("App::PropertyVector", "AxisPoint", "Circular", "a point on the axis (X/Y/Z)")
         fp.addProperty("App::PropertyIntegerConstraint", "Count", "Circular", "").Count = (4, 1, 10000, 1)
         fp.addProperty("App::PropertyAngle", "TotalAngle", "Circular", "").TotalAngle = 360
-        fp.addProperty("App::PropertyLink", "Path", "Path", "sketch holding the path")
+        fp.addProperty("App::PropertyLinkGlobal", "Path", "Path", "sketch holding the path")
         fp.addProperty("App::PropertyStringList", "PathEdges", "Path", "or: edges used as the path")
         fp.addProperty("App::PropertyBool", "Align", "Path", "rotate instances to follow the path").Align = True
         fp.addProperty("App::PropertyIntegerList", "Skip", "Pattern", "instance numbers to leave out")
@@ -727,8 +727,9 @@ class Pattern(model.Feature):
                 tool, hint = src.Proxy.tool(src, model.input_state(src))
                 op = src.ResolvedOperation.replace(" (auto)", "") or "Join"
 
-                class _Op:   # apply_tool reads these
+                class _Op:   # apply_tool reads these (and the source's component, for its scope)
                     Operation, Targets, ResolvedOperation, Name = op, [], op, fp.Name
+                    Document, Profile, Home = fp.Document, getattr(src, "Profile", None), getattr(src, "Home", "")
                 for k, pl in instances:
                     inst = tool.transformed(pl)
                     inst = topo.Body(inst.shape, ["%s@%s.%d" % (t, fp.Name, k) for t in inst.tags])
