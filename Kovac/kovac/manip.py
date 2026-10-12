@@ -117,23 +117,37 @@ class Arrow:
         return getattr(self.ed.fp, self.prop).Value
 
     def refresh(self):
+        if getattr(self, "dragging", False) and self.axis is not None:
+            return self._draw(self.value(), self.into)    # mid-drag: the axis stays, only the value moved
         overlay.remove(self.node)
         self.node, self.axis, self.seg = None, self.axis_fn(self.ed.fp), None
         if self.axis is None or Gui.activeView() is None:
             return
         o, n = self.axis
-        at = o + n * self.value()                # where the moving face is now
         it = navigation.install(Gui.activeView())
-        px = self.px = it.px_size() if it is not None else 0.05
-        d = n * (1 if self.value() >= 0 else -1)
+        self.px = it.px_size() if it is not None else 0.05
+        self._draw(self.value(), None)
+
+    def _draw(self, value, into):
+        """Put the arrow at value; into (whether it points into material) is worked out here
+        unless given -- a drag passes the one from its press, so following the mouse stays a
+        cheap redraw of the arrow alone, never a solid-inside test per mouse move."""
+        overlay.remove(self.node)
+        o, n = self.axis
+        px = self.px
+        at = o + n * value                       # where the moving face is now
+        d = n * (1 if value >= 0 else -1)
         length = ARROW_PX * px                   # a fixed screen size: only its place follows the value
-        if self._into_part(at, d, px):           # heading into material: come in from outside, tip on the face
+        if into is None or (into[0] != (value >= 0)):
+            into = (value >= 0, self._into_part(at, d, px))
+        self.into = into
+        if into[1]:                              # heading into material: come in from outside, tip on the face
             a, b = at - d * length, at
         else:                                    # out into free space: start on the face
             a, b = at, at + d * length
         self.seg = (a, b)
         self.node = overlay.add(overlay.arrow_node(a, b, palette.accent(), px))
-        self.place_field(b if b is not at else a)
+        self.place_field(a if into[1] else b)
 
     def _into_part(self, o, d, px):
         """Whether the arrow heads into material (a fillet on an outside edge, a cut): it then
@@ -200,6 +214,7 @@ class Arrow:
         if abs(value) < 1e-6:
             value = 0.01 if self.value() > 0 else -0.01
         self.ed.set(self.prop, value)
+        self._draw(value, getattr(self, "into", None))   # the arrow follows the mouse at once; the solid catches up
 
     def release(self, it, pos):
         self.dragging = False

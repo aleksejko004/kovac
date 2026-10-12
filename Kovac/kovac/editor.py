@@ -694,7 +694,10 @@ class Editor(QtWidgets.QWidget):
         self.changed()
 
     def changed(self):
-        self.timer.start()
+        # a steady stream of changes (an arrow being dragged) previews every 60 ms as it goes,
+        # rather than only once the mouse stops
+        if not self.timer.isActive():
+            self.timer.start()
 
     def preview(self):
         model.commit(self.doc)

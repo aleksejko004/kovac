@@ -511,13 +511,16 @@ def scenario():
     o, n = arrow.axis
     a0 = to_qt(o + n * 5)
     mouse(QtCore.QEvent.MouseButtonPress, a0, QtCore.Qt.LeftButton, QtCore.Qt.LeftButton)
+    follows = []
     for k in range(1, 6):
         mouse(QtCore.QEvent.MouseMove, a0 - QtCore.QPoint(0, 12 * k), QtCore.Qt.NoButton, QtCore.Qt.LeftButton)
+        follows.append(arrow.seg is not None and abs((arrow.seg[0] - o).dot(n) - ed.fp.Length.Value) < 1e-6)
         yield 40
     mouse(QtCore.QEvent.MouseButtonRelease, a0 - QtCore.QPoint(0, 60), QtCore.Qt.LeftButton, QtCore.Qt.NoButton)
     yield 200
     dragged = ed.fp.Length.Value
     check("dragging the arrow changes the distance", dragged > 6, dragged)
+    check("the arrow follows each mouse move at once, not after the preview", all(follows), follows)
     ed.set("Length", 5)
     yield 300
     from kovac import manip
@@ -1007,6 +1010,55 @@ def scenario():
           len(skc.Geometry) == 2 and len(lifted) == 2 and all(z > 2 for z in tops) and
           App.ActiveDocument.UndoNames[:1] == ["Move"], (len(skc.Geometry), tops, App.ActiveDocument.UndoNames[:2]))
     move.finish()
+
+    # -- Move "Points" outside the sketch: a corner clicked on the sketch in the view; then a typed length --
+    App.newDocument("MovePointsTest")
+    yield 300
+    skp = sketchmode.create("XY")
+    for a, b in ((V(0, 0, 0), V(40, 0, 0)), (V(40, 0, 0), V(40, 20, 0)), (V(40, 20, 0), V(0, 20, 0)), (V(0, 20, 0), V(0, 0, 0))):
+        skp.addGeometry(Part.LineSegment(a, b))
+    sketchmode.finish()
+    App.ActiveDocument.recompute()
+    yield 400
+    corner = next(k for k, v in enumerate(skp.Shape.Vertexes) if (v.Point - V(40, 0, 0)).Length < 1e-6)
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(skp, "Vertex%d" % (corner + 1))
+    command("Kovac_Move")
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 800
+    ses = move._session
+    combo = ses.dock.widget().findChild(QtWidgets.QComboBox, "kovacMoveType")
+    check("Move on sketch points picked in the view opens as Points, with the drop-down",
+          ses is not None and ses.move_type == "Points" and combo is not None and combo.currentText() == "Points",
+          ses and ses.move_type)
+    tri = ses.triad
+    itc = navigation.install()
+    p, axes = tri.t.frame()
+    pxc = itc.px_size()
+    drag_vp(scc(p + axes[0] * move.ARROW_PX * pxc * 0.8), scc(p + axes[0] * (move.ARROW_PX * pxc * 0.8 + 25)))
+    yield 300
+    ends = lambda: sorted((g.StartPoint.x, g.EndPoint.x) for g in skp.Geometry)   # noqa: E731
+    xs = [x for pair in ends() for x in pair]
+    check("Points: dragging the X arrow moves the clicked corner, both lines stay joined there",
+          max(xs) > 41 and xs.count(max(xs)) == 2, ends())
+    field = tri.label
+    check("the triad shows an editable field with the dragged length",
+          isinstance(field, QtWidgets.QLineEdit) and field.isVisible() and "mm" in field.text(), field and field.text())
+    field.setText("25 mm")
+    field.returnPressed.emit()
+    yield 300
+    xs = [x for pair in ends() for x in pair]
+    check("typing a length in the triad's field moves the corner exactly that far, one undo step",
+          abs(max(xs) - 65) < 1e-6 and xs.count(max(xs)) == 2 and App.ActiveDocument.UndoNames[:1] == ["Move"],
+          (ends(), App.ActiveDocument.UndoNames[:3]))
+    combo.setCurrentText("Bodies")
+    yield 500
+    edb = editor.current()
+    check("Points -> Bodies in the drop-down closes the points window and opens the bodies move",
+          move._session is None and edb is not None and type(edb.fp.Proxy).kind == "Move", move._session)
+    if edb is not None:
+        edb.reject()
+    yield 300
 
 def run(gen):
     try:

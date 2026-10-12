@@ -3,7 +3,8 @@
 
 What is selected decides what moves. The on-canvas triad has an arrow along each axis (drag to
 slide along it) and a turning handle around each one (drag to rotate about it); distances snap
-to the grid step, angles to 5 degrees, and the value being dragged shows next to the cursor.
+to the grid step, angles to 5 degrees. The amount moved or turned with the last handle shows in
+a field next to it: type a value there and Enter moves it exactly that far.
 Bodies move as a history feature (Transform, about the bodies' own centre); construction planes
 are set free where they are dropped; sketch points and lines move in the sketch plane and turn
 about its normal; a face pushes or pulls along its normal (Face Pull).
@@ -39,17 +40,22 @@ class Triad:
     def __init__(self, target, translations=(0, 1, 2), rotations=(0, 1, 2)):
         self.t, self._handles = target, (translations, rotations)
         self.node, self.drag, self.label = None, None, None
+        self.last, self.totals = None, {}   # the handle last used, and each handle's total so far
         self.in_edit = True                 # takes clicks inside a sketch too (only on its own handles)
         navigation.hooks.insert(0, self)
         self.redraw()
 
+    def _which(self):
+        h = self.t.handles() if hasattr(self.t, "handles") else None
+        return h if h is not None else self._handles
+
     @property
     def translations(self):
-        return self.t.handles()[0] if hasattr(self.t, "handles") else self._handles[0]
+        return self._which()[0]
 
     @property
     def rotations(self):
-        return self.t.handles()[1] if hasattr(self.t, "handles") else self._handles[1]
+        return self._which()[1]
 
     # drawing -------------------------------------------------------------------
     def _px(self):
@@ -138,8 +144,10 @@ class Triad:
             o, d = overlay.ray(it, pos)
             start = overlay.hit_plane(o, d, p, axes[h[1]])
         self.drag = (h, V(p), [V(a) for a in axes], start)
+        self.last, self.drag_value = h, 0.0
         self.t.begin(h)
         self.redraw()
+        self._show(self.totals.get(h, 0.0))
         return True
 
     def move(self, it, pos):
@@ -155,7 +163,7 @@ class Triad:
             if s and not QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.AltModifier:
                 value = round(value / (s / 2)) * (s / 2)
             self.t.translate(i, value)
-            self._show(it, pos, "%.2f mm" % value)
+            self.drag_value = value
         else:
             q = overlay.hit_plane(o, d, p, axes[i])
             if q is None or start is None:
@@ -167,29 +175,88 @@ class Triad:
             if not QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.AltModifier:
                 ang = round(ang / ANGLE_STEP) * ANGLE_STEP
             self.t.rotate(i, ang)
-            self._show(it, pos, "%.0f°" % ang)
+            self.drag_value = ang
         self.redraw()
+        self._show(self.totals.get((kind, i), 0.0) + self.drag_value)
 
     def release(self, it, pos):
         if self.drag is None:
             return
-        self.drag = None
-        if self.label is not None:
-            self.label.hide()
+        h = self.drag[0]
+        self.totals[h] = self.totals.get(h, 0.0) + getattr(self, "drag_value", 0.0)
+        self.drag, self.drag_value = None, 0.0
         self.t.end()
         self.redraw()
+        self._show(self.totals[h])
+        if self.label is not None:          # click a handle, type the amount
+            self.label.setFocus()
+            self.label.selectAll()
 
-    def _show(self, it, pos, text):
+    # the value field ----------------------------------------------------------
+    def _tip(self, h):
+        """Where the field sits: by the arrow's head, or by the end of the turning handle."""
+        frame = self.t.frame()
+        if frame is None:
+            return None
+        p, axes = frame
+        px = self._px()
+        kind, i = h
+        if kind == "t":
+            return p + axes[i] * ARROW_PX * px
+        return self._ring(p, axes[(i + 1) % 3], axes[(i + 2) % 3], RING_PX * px)[-1]
+
+    @staticmethod
+    def _text(h, value):
+        return ("%.2f mm" % value) if h[0] == "t" else ("%.1f°" % value).replace(".0°", "°")
+
+    def _show(self, value):
+        """The amount moved (an arrow: a length) or turned (a handle: an angle) along the last
+        handle used, next to it: type another value and Enter moves it there."""
+        h = self.last
+        view = Gui.activeView()
+        if h is None or view is None or not hasattr(view, "graphicsView"):
+            return
+        vp = view.graphicsView().viewport()
         if self.label is None:
-            self.label = QtWidgets.QLabel(it.vp, objectName="kovacFloatingField")
-            self.label.setStyleSheet("background: rgba(20,22,25,210); color: white; padding: 3px 6px; border-radius: 4px;")
-        self.label.setText(text)
-        self.label.adjustSize()
-        self.label.move(pos.x() + 18, pos.y() + 14)
+            self.label = _Field(vp)
+            self.label.setFixedWidth(110)
+            self.label.returnPressed.connect(self._typed)
+            self.label.setToolTip("Distance along the arrow, or angle about the handle: type a value, Enter")
+        if not (self.label.hasFocus() and self.drag is None):
+            self.label.setText(self._text(h, value))
+        tip = self._tip(h)
+        if tip is not None:
+            r = vp.devicePixelRatioF()
+            x, y = view.getPointOnViewport(tip)
+            self.label.move(int(x / r) + 14, int(vp.height() - y / r) - 30)
         self.label.show()
+
+    def _typed(self):
+        h = self.last
+        if h is None:
+            return
+        text = self.label.text().strip()
+        try:
+            q = App.Units.Quantity(text.replace(",", "."))
+            value = q.Value if q.Unit == App.Units.Unit() else q.getValueAs("mm" if h[0] == "t" else "deg").Value
+        except Exception:
+            self.label.setStyleSheet("color: %s;" % palette.SEMANTIC["error"])
+            return
+        self.label.setStyleSheet("")
+        delta = value - self.totals.get(h, 0.0)
+        if abs(delta) > 1e-12:
+            self.t.begin(h)                  # one undo step, as a drag of exactly that much
+            (self.t.translate if h[0] == "t" else self.t.rotate)(h[1], delta)
+            self.t.end()
+            self.totals[h] = value
+        self.label.clearFocus()
+        self.redraw()
+        self._show(value)
 
     def refresh(self):          # an editor hook: redraw after the panel changed something
         self.redraw()
+        if self.label is not None and self.label.isVisible():
+            self._show(self.totals.get(self.last, 0.0))
 
     def detach(self):
         overlay.remove(self.node)
@@ -198,6 +265,20 @@ class Triad:
             self.label = None
         if self in navigation.hooks:
             navigation.hooks.remove(self)
+
+
+class _Field(QtWidgets.QLineEdit):
+    """The triad's value field: Enter here applies the value (it never reaches the panel's
+    own Enter = OK), Esc gives the keyboard back to the view."""
+
+    def __init__(self, parent):
+        super().__init__(parent, objectName="kovacFloatingField")
+
+    def event(self, ev):
+        if ev.type() == QtCore.QEvent.ShortcutOverride and ev.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+            ev.accept()
+            return True
+        return super().event(ev)
 
 
 WORLD = [V(1, 0, 0), V(0, 1, 0), V(0, 0, 1)]
@@ -314,14 +395,26 @@ def effective(fp):
 class Session:
     """A triad outside the feature panels: one undo step per drag, Done or Esc ends it."""
 
-    def __init__(self, target, title, **triad):
-        self.target = target
+    def __init__(self, target, title, move_type=None, **triad):
+        self.target, self.move_type = target, move_type
+        target.session = self
         self.triad = Triad(self, **triad)
         from kovac import panel
         from PySide import QtGui
         w = QtWidgets.QWidget(objectName="kovacMoveSession")
         lay = QtWidgets.QVBoxLayout(w)
-        tip = QtWidgets.QLabel("Drag an arrow to slide, a curved handle to turn. Alt: no snapping.", objectName="kovacMuted")
+        if move_type is not None:           # the same "Move" drop-down as the Bodies / Faces panel
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(QtWidgets.QLabel("Move"))
+            combo = QtWidgets.QComboBox(objectName="kovacMoveType")
+            combo.addItems(TYPES)
+            combo.setCurrentText(move_type)
+            combo.currentTextChanged.connect(lambda t: QtCore.QTimer.singleShot(0, lambda: switch(self, t)))
+            row.addWidget(combo, 1)
+            lay.addLayout(row)
+        tip = QtWidgets.QLabel(("Click the sketch points or lines to move. " if move_type == "Points" else "") +
+                               "Drag an arrow to slide, a curved handle to turn; click one to type the amount. "
+                               "Alt: no snapping.", objectName="kovacMuted")
         tip.setWordWrap(True)
         lay.addWidget(tip)
         done = QtWidgets.QPushButton("Done", objectName="kovacPrimary")
@@ -338,6 +431,9 @@ class Session:
     # the triad's target, forwarded with the undo step around it
     def frame(self):
         return self.target.frame()
+
+    def handles(self):
+        return self.target.handles() if hasattr(self.target, "handles") else None
 
     def begin(self, handle=None):
         self.target.doc.openTransaction("Move")
@@ -356,6 +452,8 @@ class Session:
 
     def close(self):
         self.triad.detach()
+        if hasattr(self.target, "detach"):
+            self.target.detach()
         self.esc.setEnabled(False)
         self.esc.deleteLater()
         self.dock.setObjectName("")
@@ -519,6 +617,111 @@ class SketchTarget:
         self._apply(App.Placement(V(), App.Rotation(V(0, 0, 1), ang), self.centre))
 
 
+class PointsTarget:
+    """Move's "Points": the sketch points and lines picked -- in the sketch being edited, or
+    clicked on a sketch in the view -- moved as a SketchTarget. Until something is picked the
+    triad waits; picking other points moves the triad over to them."""
+
+    def __init__(self):
+        self.inner, self.session = None, None
+        self.pick()
+        Gui.Selection.addObserver(self)
+
+    @property
+    def doc(self):
+        return self.inner.doc if self.inner is not None else App.ActiveDocument
+
+    def pick(self):
+        found = current_points()
+        if found:
+            self.inner = SketchTarget(*found)
+
+    def handles(self):
+        return ((0, 1, 2), (0, 1, 2)) if self.inner is not None else ((), ())
+
+    def frame(self):
+        return self.inner.frame() if self.inner is not None else None
+
+    def begin(self, handle=None):
+        self.inner.begin(handle)
+
+    def translate(self, i, d):
+        self.inner.translate(i, d)
+
+    def rotate(self, i, ang):
+        self.inner.rotate(i, ang)
+
+    # selection observer
+    def _changed(self, *_a):
+        QtCore.QTimer.singleShot(0, self._repick)
+
+    addSelection = removeSelection = setSelection = clearSelection = _changed
+
+    def _repick(self):
+        s = self.session
+        if s is None or s.triad.drag is not None:
+            return
+        before = self.inner
+        self.pick()
+        if self.inner is not before:
+            s.triad.totals, s.triad.last = {}, None
+            if s.triad.label is not None:
+                s.triad.label.hide()
+        s.triad.redraw()
+
+    def detach(self):
+        Gui.Selection.removeObserver(self)
+
+
+def shape_picks(sk, subs):
+    """Sketch elements clicked in the view outside the sketch (names of the sketch's shape) as
+    (geo index, point pos): a corner takes every point lying on it, so joined ends stay joined."""
+    inv = sk.Placement.inverse()
+    out = []
+    geo = sk.Geometry
+    for sub in subs:
+        name = sub.split(".")[-1]
+        if name.startswith("Vertex"):
+            p = inv.multVec(sk.Shape.Vertexes[int(name[6:]) - 1].Point)
+            for g in range(len(geo)):
+                for pos in (1, 2, 3):
+                    try:
+                        q = sk.getPoint(g, pos)
+                    except Exception:
+                        continue
+                    if (q - p).Length < 1e-6 and (g, pos) not in out:
+                        out.append((g, pos))
+        elif name.startswith("Edge"):
+            e = sk.Shape.Edges[int(name[4:]) - 1]
+            mid = Part.Vertex(inv.multVec(e.valueAt((e.FirstParameter + e.LastParameter) / 2)))
+            for g, g0 in enumerate(geo):
+                if sk.getConstruction(g) or isinstance(g0, Part.Point):
+                    continue
+                if g0.toShape().distToShape(mid)[0] < 1e-6 and (g, 0) not in out:
+                    out.append((g, 0))
+                    break
+    return out
+
+
+def current_points():
+    """(sketch, picks) for the sketch elements selected now, or None."""
+    from kovac import sketchmode
+    if sketchmode.in_sketch():
+        sk = Gui.ActiveDocument.getInEdit().Object
+        picks = sketch_picks(sk)
+        return (sk, picks) if picks else None
+    for s in Gui.Selection.getSelectionEx("", 0):
+        if s.Object.TypeId.startswith("Sketcher::SketchObject"):
+            picks = shape_picks(s.Object, s.SubElementNames)
+            if picks:
+                return s.Object, picks
+    return None
+
+
+def points():
+    return _start(PointsTarget(), "Move sketch points", move_type="Points")
+
+
 _session = None
 
 
@@ -559,13 +762,8 @@ def sketch_picks(sk):
 
 def command():
     from kovac import design, editor, sketchmode
-    if sketchmode.in_sketch():
-        sk = Gui.ActiveDocument.getInEdit().Object
-        picks = sketch_picks(sk)
-        if not picks:
-            commands.report("Select the points or lines to move first.")
-            return
-        return _start(SketchTarget(sk, picks), "Move sketch elements")
+    if sketchmode.in_sketch() or current_points():
+        return points()
     sel = Gui.Selection.getSelectionEx("", 0)
     for s in sel:
         if type(getattr(s.Object, "Proxy", None)).__name__ == "DatumPlane" and not getattr(s.Object, "Auto", False):
@@ -585,29 +783,39 @@ def command():
 
 
 _picked_faces = []      # the faces picked when Move started, for switching to "Faces" in its panel
-TYPES = ("Bodies", "Faces")
+TYPES = ("Bodies", "Faces", "Points")
 
 
 def type_of(fp):
     return "Faces" if type(fp.Proxy).kind == "MoveFace" else "Bodies"
 
 
-def switch(ed, what):
-    """The panel's "Move" drop-down: drop the move being set up and start the other kind on
-    the same picks -- a face's body for Bodies, the picked face (or one to pick) for Faces."""
-    from kovac import editor, modify, topo
-    if what == type_of(ed.fp):
+def switch(source, what):
+    """The "Move" drop-down (in the Bodies / Faces panel and in the Points window): drop the
+    move being set up and start the other kind on the same picks -- a face's body for Bodies,
+    the picked face (or one to pick) for Faces, the selected sketch points for Points."""
+    from kovac import design, editor, modify, sketchmode
+    session = isinstance(source, Session)
+    if what == (source.move_type if session else type_of(source.fp)):
         return None
+    fp = None if session else source.fp
+    bodies = list(getattr(fp, "Bodies", []) or [])
+    if getattr(fp, "Face", ""):
+        bodies = [topo.loads(fp.Face)["b"]]
+    if session:
+        finish()
+    else:
+        source.reject()
+    if what == "Points":
+        return points()
+    if sketchmode.in_sketch():
+        sketchmode.finish()
     if what == "Faces":
-        bodies = set(ed.fp.Bodies)
         now = [model.pick_ref(x.Object, sub) for x in Gui.Selection.getSelectionEx("", 0) for sub in x.SubElementNames]
         faces = [f for f in [f for f in now if f] + _picked_faces if topo.loads(f)["k"] == "Face"]
         faces = [f for f in faces if not bodies or topo.loads(f)["b"] in bodies]
-        ed.reject()
         return editor.start(modify.MoveFace, **({"Face": faces[0]} if faces else {}))
-    bodies = [topo.loads(ed.fp.Face)["b"]] if ed.fp.Face else []
-    ed.reject()
-    new = editor.start(_transform(), Bodies=bodies)
+    new = editor.start(_transform(), Bodies=bodies or design.selected_bodies())
     if new.fp.Bodies:
         new.fp.Pivot = bodies_centre(new.fp)
     return new
