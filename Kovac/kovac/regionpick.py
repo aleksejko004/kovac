@@ -93,7 +93,13 @@ class ProfileHover:
         self.cache = {}
 
     def regions(self, sk):
-        key = (sk.Name, len(sk.Geometry), round(sk.Shape.Length, 6), str(sk.getGlobalPlacement()))
+        try:                     # an empty sketch (only construction lines, or one the solver failed) has no shape
+            length = round(sk.Shape.Length, 6) if not sk.Shape.isNull() else 0.0
+        except Exception:
+            length = None
+        if length is None or length == 0.0:
+            return []
+        key = (sk.Name, len(sk.Geometry), length, str(sk.getGlobalPlacement()))
         if self.cache.get(sk.Name, (None,))[0] != key:
             try:
                 rs = regions.of_sketch(sk)

@@ -1091,8 +1091,12 @@ def seg_offset():
     yield 500
     n0 = len(sk.Geometry)
     Gui.Selection.clearSelection()
+    command("Kovac_SketchOffset")              # nothing picked: it opens and waits for the curve
+    yield 300
+    waiting = sketchoffset._tool
+    check("Offset with nothing selected opens and waits for a curve",
+          waiting is not None and waiting.result is None and "Click" in waiting.status.text(), waiting)
     Gui.Selection.addSelection(sk, "Edge%d" % (g + 1))
-    command("Kovac_SketchOffset")
     yield 400
     tool = sketchoffset._tool
     check("Offset on a B-spline opens Kovač's offset with a live preview",

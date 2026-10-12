@@ -8,6 +8,7 @@ to its true offset. Picked curves that join end to end are offset as one chain o
 side: where neighbours' offsets now overlap (an inside corner) both are trimmed to where they
 cross, where they part (an outside corner) a round corner about the old point closes the gap.
 A selection of only lines, arcs and circles goes to the sketcher's own Offset, as before.
+With nothing selected the panel opens and waits: the curves clicked next are offset.
 """
 import math
 
@@ -259,6 +260,7 @@ class Tool:
         from kovac import grid, move, panel
         self.sk, self.picks = sk, picks
         self.geos = [sk.Geometry[k] for k in picks]
+        self.arrow = None
         s = grid.step() or 1.0
         self.d, self.preview_node, self.result = s, None, None
         w = QtWidgets.QWidget(objectName="kovacSketchOffset")
@@ -290,22 +292,46 @@ class Tool:
         self.dock.setWindowTitle("Offset")
         self.dock.setWidget(w)
         self.dock.show()
-        self.arrow = _Arrow(self)
+        self.arrow = _Arrow(self) if picks else None
         self.set(self.d)
         self.field.setFocus()
         self.field.selectAll()
+        Gui.Selection.addObserver(self)
+
+    # selection observer: the curves to offset follow what is selected (Ctrl adds more)
+    def _changed(self, *_a):
+        QtCore.QTimer.singleShot(0, self._repick)
+
+    addSelection = removeSelection = setSelection = clearSelection = _changed
+
+    def _repick(self):
+        if _tool is not self or (self.arrow is not None and self.arrow.dragging):
+            return
+        picks = _picks(self.sk)
+        if not picks or picks == self.picks:
+            return              # a click on empty space keeps what is already picked
+        self.picks, self.geos = picks, [self.sk.Geometry[k] for k in picks]
+        if self.arrow is not None:
+            self.arrow.detach()
+        self.arrow = _Arrow(self)
+        self.set(self.d)
 
     def set(self, d):
         self.d = d
         if not self.field.hasFocus():
             self.field.setText("%.2f mm" % d)
-        try:
-            self.result = offset(self.geos, d)
-            self.status.setText("")
-        except Exception as e:
+        if not self.geos:
             self.result = None
-            self.status.setText(str(e))
-        self.arrow.draw()
+            self.status.setText("Click the curves to offset (Ctrl adds more).")
+        else:
+            try:
+                self.result = offset(self.geos, d)
+                self.status.setText("")
+            except Exception as e:
+                self.result = None
+                self.status.setText(str(e))
+        if self.arrow is not None:
+            self.arrow.draw()
         self.draw_preview()
 
     def typed(self):
@@ -364,7 +390,9 @@ class Tool:
 
     def close(self):
         global _tool
-        self.arrow.detach()
+        Gui.Selection.removeObserver(self)
+        if self.arrow is not None:
+            self.arrow.detach()
         overlay.remove(self.preview_node)
         self.dock.setObjectName("")
         self.dock.close()
@@ -383,11 +411,8 @@ def command():
         commands.report("Offset works inside a sketch: select its curves first.")
         return
     sk = Gui.ActiveDocument.getInEdit().Object
-    picks = _picks(sk)
-    if not picks:
-        commands.report("Select the curves to offset first.")
-        return
-    if all(isinstance(sk.Geometry[k], NATIVE) for k in picks):
+    picks = _picks(sk)              # nothing picked yet: the panel opens and waits for the clicks
+    if picks and all(isinstance(sk.Geometry[k], NATIVE) for k in picks):
         Gui.runCommand("Sketcher_Offset")   # lines, arcs and circles: the sketcher's own does them well
         return
     if _tool is not None:
