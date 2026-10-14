@@ -54,6 +54,7 @@ A feature's output is a *state*: all bodies with their face tags, stored as the 
 ## Rules the code follows
 
 - **Every user action goes through `commands.transaction()` or `commands.add()`**: one undo step, recomputed before commit, plain-language errors, no modal dialogs.
+- **Tools that stay on** (pickers, Drag, the Joint panel) register with `commands.started()`. Modelling commands (`add(..., ends_tools=True)`) end them before they start; Kovač's Undo and Redo (`commands.step`, which take over Ctrl+Z and Ctrl+Y from FreeCAD's) only end them when one is running.
 - **Modes swap command bars only.** Model, tree, timeline and selection are shared (`shell.set_mode`).
 - **Machinery stays hidden.** `tree.role()` is the single place that decides what the user sees as component / body / sketch / reference / joint / analysis / feature (timeline only) / machinery (never shown).
 - **Kovač owns viewport input outside edit modes.** In a FreeCAD edit mode (e.g. a sketch), left and right buttons pass through to FreeCAD.

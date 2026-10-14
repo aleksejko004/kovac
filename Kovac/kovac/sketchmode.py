@@ -166,6 +166,7 @@ class PlanePicker:
         commands.report("Pick a plane or a flat face to sketch on (Esc to cancel)", error=False)
         self.esc = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), Gui.getMainWindow())
         self.esc.activated.connect(self.cancel)
+        self.running = commands.started(self.cancel)      # Undo, or another command, ends the picking
 
     def plane_at(self, it, pos):
         o, d = overlay.ray(it, pos)
@@ -226,7 +227,11 @@ class PlanePicker:
         pass
 
     def cancel(self):
+        commands.ended(self.running)
+        if self.node is None:
+            return
         overlay.remove(self.node)
+        self.node = None
         if self in navigation.hooks:
             navigation.hooks.remove(self)
         self.esc.setEnabled(False)

@@ -288,4 +288,4 @@ COMMANDS = [
 
 def register():
     for cid, label, tip, fn, icon, key in COMMANDS:
-        commands.add(cid, label, tip, fn, icon=kovac.icon(icon), key=key)
+        commands.add(cid, label, tip, fn, icon=kovac.icon(icon), key=key, ends_tools=True)

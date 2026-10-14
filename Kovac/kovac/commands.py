@@ -15,6 +15,7 @@ import FreeCAD as App
 REGISTRY = {}   # command id -> _Command (ours only)
 last = None     # id of the last command run, ours or stock
 last_trace = ""  # traceback of the last failed command (console log, tests)
+_running = []   # [stop, owner command id] of tools that stay on until ended (see started())
 
 
 @contextlib.contextmanager
@@ -46,9 +47,52 @@ def report(message, error=True):
         pass
 
 
+def started(stop, cid=None):
+    """A tool that stays on until it is ended (the sketch-plane picker, Drag, the Joint panel)
+    calls this with its stop function. Modelling commands end it before they start, except
+    the tool's own command `cid`, which decides itself (Drag's toggles it off). Hand the
+    returned entry to ended() when the tool stops."""
+    entry = [stop, cid]
+    _running.append(entry)
+    return entry
+
+
+def ended(entry):
+    if entry in _running:
+        _running.remove(entry)
+
+
+def end_tools(keep=None):
+    """Stop every running tool except those owned by `keep`; how many were stopped."""
+    n = 0
+    for entry in list(_running):
+        if entry[1] is not None and entry[1] == keep:
+            continue
+        ended(entry)
+        n += 1
+        try:
+            entry[0]()
+        except Exception:
+            import traceback
+            App.Console.PrintLog(traceback.format_exc())
+    return n
+
+
+def step(cid):
+    """Undo or redo (`cid` is "Std_Undo" or "Std_Redo"). While a tool is running, a step back
+    only leaves the tool: it never takes back work done before the tool started."""
+    if end_tools():
+        report("Left the running tool; nothing was undone.", error=False)
+        return
+    import FreeCADGui as Gui
+    Gui.runCommand(cid)
+
+
 def invoke(cid, fn):
     global last
     last = cid
+    if cid in REGISTRY and REGISTRY[cid].ends_tools:
+        end_tools(keep=cid)
     try:
         fn()
     except Exception as e:  # plain-language message, details stay in the console
@@ -71,8 +115,9 @@ def run(cid):
 
 
 class _Command:
-    def __init__(self, cid, text, tip, fn, icon, key, active):
+    def __init__(self, cid, text, tip, fn, icon, key, active, ends_tools):
         self.cid, self.text, self.tip, self.fn, self.icon, self.key, self.active = cid, text, tip, fn, icon, key, active
+        self.ends_tools = ends_tools
 
     def GetResources(self):
         r = {"MenuText": self.text, "ToolTip": self.tip}
@@ -92,9 +137,10 @@ class _Command:
         invoke(self.cid, self.fn)
 
 
-def add(cid, text, tip, fn, icon="", key="", active=None):
+def add(cid, text, tip, fn, icon="", key="", active=None, ends_tools=False):
+    """`ends_tools`: a modelling command, which ends running tools first (started())."""
     import FreeCADGui as Gui
-    REGISTRY[cid] = _Command(cid, text, tip, fn, icon, key, active)
+    REGISTRY[cid] = _Command(cid, text, tip, fn, icon, key, active, ends_tools)
     Gui.addCommand(cid, REGISTRY[cid])
     return cid
 

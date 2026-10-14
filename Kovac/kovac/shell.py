@@ -198,6 +198,30 @@ def _left_drag(kind):
     return run
 
 
+def _can_step(cid):
+    def active():
+        doc = App.ActiveDocument
+        return bool(commands._running) or (doc is not None and (doc.UndoCount if cid == "Std_Undo" else doc.RedoCount) > 0)
+    return active
+
+
+def _take_step_keys():
+    """Undo and Redo keys move from FreeCAD's commands to ours (two actions on one key fire
+    neither); ours sit on the main window too, so the keys work wherever the bars are hidden."""
+    mw = Gui.getMainWindow()
+    for cid in ("Std_Undo", "Std_Redo"):
+        stock = Gui.Command.get(cid)
+        key = stock.getShortcut() if stock else ""
+        for a in (stock.getAction() if stock else []):
+            a.setShortcut(QtGui.QKeySequence())
+        for a in _actions(cid.replace("Std_", "Kovac_")):
+            if key:
+                a.setShortcut(QtGui.QKeySequence(key))
+                a.setToolTip("%s  (%s)" % (a.text(), key))
+            if a not in mw.actions():
+                mw.addAction(a)
+
+
 def _toggle_advanced():
     kovac.prefs().SetBool("Advanced", not advanced())
     apply_visibility()
@@ -243,6 +267,9 @@ def register():
         key="Ctrl+N")
     add("Kovac_ImportStep", "Import STEP…", "Bring a STEP model into the design", _import_step, icon=kovac.icon("import_step"))
     add("Kovac_ExportStep", "Export STEP…", "Export the selected (or all) bodies as STEP", _export_step, active=commands.has_doc)
+    for cid, text, icon in (("Std_Undo", "Undo", "edit-undo"), ("Std_Redo", "Redo", "edit-redo")):
+        add(cid.replace("Std_", "Kovac_"), text, "%s the last step; while a tool is running, leave the tool instead" % text,
+            lambda c=cid: commands.step(c), icon=icon, active=_can_step(cid))
     add("Kovac_Start", "Start page", "Show the start page", _lazy("startpage", "create"))
     add("Kovac_About", "About Kovač", "Version and credits", about)
     add("Kovac_Advanced", "Advanced / Expert", "Show or hide FreeCAD's own workbenches, menus and panels", _toggle_advanced)
@@ -446,7 +473,8 @@ def build_ui():
                 menu.addAction(a)
     menu_btn.setMenu(menu)
     app.addWidget(menu_btn)
-    for cid in ("Std_Save", "Std_Undo", "Std_Redo"):
+    _take_step_keys()
+    for cid in ("Std_Save", "Kovac_Undo", "Kovac_Redo"):
         for a in _actions(cid):
             app.addAction(a)
     spacer = QtWidgets.QWidget()

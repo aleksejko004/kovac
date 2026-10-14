@@ -1268,6 +1268,65 @@ def seg_assembly():
     check("the browser's Joints folder lists the joint and the ground", jl == ["Joints  (2)"], jl)
     shot("assembly_joint")
 
+    # -- sketching after a joint: a selected face of a component, then a face clicked in the picker --
+    def new_sketch(act):
+        before = {o.Name for o in doc.Objects}
+        yield from act()
+        made = [o for o in doc.Objects if o.Name not in before and o.TypeId == "Sketcher::SketchObject"]
+        result.append(made[0] if made else None)
+        if sketchmode.in_sketch():
+            sketchmode.finish()
+        yield 300
+
+    def selected_face():
+        Gui.Selection.clearSelection()
+        click_at(V(45, 30, 10))                        # the plate's top face
+        yield 150
+        command("Kovac_Sketch")
+        yield 600
+    result = []
+    yield from new_sketch(selected_face)
+    sk = result[-1]
+    check("after a joint, a selected face of a component still takes a sketch",
+          sk is not None and abs(sk.getGlobalPlacement().Base.z - 10) < 1e-6,
+          (sk and sk.getGlobalPlacement(), Gui.getMainWindow().statusBar().currentMessage(),
+           [(x.Object.Name, x.SubElementNames) for x in Gui.Selection.getSelectionEx("", 0)]))
+
+    def picked_face():
+        Gui.Selection.clearSelection()
+        command("Kovac_DragComponent")                 # left on: Sketch must end it, or it takes the clicks
+        yield 200
+        command("Kovac_Sketch")
+        yield 600
+        top = pin_c.Placement.multVec(V(101, 1, 0))        # the pin stands upside down on the hole: its z = 0 end is on top
+        click_at(top)
+        yield 600
+    yield from new_sketch(picked_face)
+    sk = result[-1]
+    check("after a joint, with Drag left on, Sketch ends Drag and the picker takes a clicked face of a moved component",
+          sk is not None and abs(sk.getGlobalPlacement().Base.z - 40) < 1e-6 and assemble._drag is None,
+          (sk and sk.getGlobalPlacement(), Gui.getMainWindow().statusBar().currentMessage()))
+
+    # -- Undo while picking a plane ends the picker and undoes nothing --
+    Gui.Selection.clearSelection()
+    command("Kovac_Sketch")
+    yield 500
+    undos = list(doc.UndoNames)
+    command("Kovac_Undo")                              # the undo arrow; Ctrl+Z is the same command
+    yield 400
+    picking = [h for h in navigation.hooks if isinstance(h, sketchmode.PlanePicker)]
+    keys = [a.shortcut().toString() for a in Gui.Command.get("Kovac_Undo").getAction()]
+    stock = [a.shortcut().toString() for a in Gui.Command.get("Std_Undo").getAction()]
+    check("Undo while picking a sketch plane leaves the picker and undoes nothing; Ctrl+Z is Kovač's Undo",
+          not picking and list(doc.UndoNames) == undos and not sketchmode.in_sketch() and
+          keys == ["Ctrl+Z"] and stock == [""],
+          (len(picking), undos[:3], doc.UndoNames[:3], sketchmode.in_sketch(), keys, stock))
+    command("Kovac_Undo")                              # nothing running now: a real undo
+    yield 400
+    check("Undo with no tool running undoes the last step", list(doc.UndoNames) == undos[1:], (undos[:3], doc.UndoNames[:3]))
+    command("Kovac_Redo")
+    yield 400
+
     # -- Drag: the pin turns about the hole's axis, the plate holds still --
     command("Kovac_DragComponent")
     yield 200

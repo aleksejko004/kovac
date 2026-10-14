@@ -153,6 +153,7 @@ class JointTool:
         self.esc.setContext(QtCore.Qt.ApplicationShortcut)
         self.esc.activated.connect(self.cancel)
         navigation.hooks.insert(0, self)
+        self.running = commands.started(self.end)        # another command or Undo ends the panel
         self.refresh()
 
     # ------------------------------------------------------------ panel
@@ -288,6 +289,13 @@ class JointTool:
         pass
 
     # ------------------------------------------------------------ finish
+    def end(self):
+        """Ended from outside (another command, Undo): a joint already made is kept, as OK would."""
+        if self.joint is not None:
+            self.ok()
+        else:
+            self.cancel()
+
     def ok(self):
         if self.joint is None:
             return
@@ -304,6 +312,7 @@ class JointTool:
 
     def close(self):
         global _tool
+        commands.ended(self.running)
         self._clear()
         if self in navigation.hooks:
             navigation.hooks.remove(self)
@@ -417,6 +426,7 @@ class DragTool:
         self.doc = App.ActiveDocument
         self.grab = None
         navigation.hooks.insert(0, self)
+        self.running = commands.started(self.stop, "Kovac_DragComponent")
         self.esc = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), Gui.getMainWindow())
         self.esc.setContext(QtCore.Qt.ApplicationShortcut)
         self.esc.activated.connect(self.stop)
@@ -461,6 +471,7 @@ class DragTool:
 
     def stop(self):
         global _drag
+        commands.ended(self.running)
         if self in navigation.hooks:
             navigation.hooks.remove(self)
         self.esc.setEnabled(False)
@@ -568,4 +579,4 @@ COMMANDS = [
 def register():
     import kovac
     for cid, label, tip, fn, icon, key in COMMANDS:
-        commands.add(cid, label, tip, fn, icon=kovac.icon(icon), key=key)
+        commands.add(cid, label, tip, fn, icon=kovac.icon(icon), key=key, ends_tools=True)
