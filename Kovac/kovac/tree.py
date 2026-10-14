@@ -15,7 +15,7 @@ FOLDERS = (("body", "Bodies"), ("sketch", "Sketches"), ("reference", "Reference 
            ("joint", "Joints"), ("analysis", "Analyses"))
 CONTAINERS = ("App::Part", "Assembly::AssemblyObject")
 _FEATURE_PROXIES = {"Extrude", "Revolve", "Sweep", "Loft", "Primitive", "Hole", "Fillet", "Chamfer", "Shell", "Draft",
-                    "FacePull", "DeleteFace", "Combine", "SplitBody", "Transform", "Scale", "Mirror", "Pattern",
+                    "FacePull", "MoveFace", "DeleteFace", "Combine", "SplitBody", "Transform", "Scale", "Mirror", "Pattern",
                     "Thread", "Import", "RemoveBody"}
 ICONS = {"body": "body", "sketch": "sketch", "component": "component", "joint": "joint", "analysis": "section",
          "reference": "plane"}
@@ -29,6 +29,8 @@ def role(obj):
         return "body" if not obj.Shape.isNull() else "machinery"
     if proxy == "HistoryProxy":
         return "machinery"
+    if proxy == "Curve3DProxy":
+        return "sketch"
     if proxy == "SectionProxy":
         return "analysis"
     if proxy in ("DatumPlane", "DatumAxis", "DatumPoint"):
@@ -36,6 +38,14 @@ def role(obj):
     if proxy in _FEATURE_PROXIES:
         return "feature"
     tid = obj.TypeId
+    if getattr(obj, "KovacRoot", False):            # the design's own assembly: its contents show at the top
+        return "machinery"
+    if tid == "App::Link" and getattr(obj.getLinkedObject(), "TypeId", "") == "App::Part":
+        return "component"                           # an instance
+    if hasattr(obj, "ObjectToGround"):
+        return "joint"                               # a ground
+    if tid == "Assembly::JointGroup":
+        return "machinery"                           # its joints show in the Joints folder
     if tid in ("App::Origin", "App::Link", "App::VarSet") or tid.endswith("Binder"):
         return "machinery"
     if tid in ("App::Line", "App::Plane", "App::Point") and any(p.TypeId == "App::Origin" for p in obj.InList):
@@ -63,8 +73,13 @@ def role(obj):
 
 def children(doc, parent=None):
     """Direct user-visible children of the document root or of a component."""
-    objs = parent.Group if parent is not None else [
-        o for o in doc.Objects if not any(p.TypeId in CONTAINERS + ("PartDesign::Body",) for p in o.InList)]
+    if parent is not None:
+        objs = parent.Group if parent.TypeId != "App::Link" else []
+    else:
+        objs = [o for o in doc.Objects if not any(p.TypeId in CONTAINERS + ("PartDesign::Body",) for p in o.InList)]
+        asm = next((o for o in objs if getattr(o, "KovacRoot", False)), None)
+        if asm is not None:          # the design's assembly is machinery: its components sit at the top
+            objs = [o for o in objs if o is not asm] + [o for o in asm.Group if o not in objs]
     return [o for o in objs if role(o) not in ("machinery", "feature")]
 
 
@@ -89,6 +104,14 @@ def item_icon(obj):
     if r == "reference":
         kind = type(getattr(obj, "Proxy", None)).__name__
         return kovac.icon({"DatumAxis": "axis", "DatumPoint": "point"}.get(kind, "plane"))
+    if r == "component" and obj.TypeId == "App::Link":
+        return kovac.icon("instance")
+    if r == "joint":
+        if hasattr(obj, "ObjectToGround"):
+            return kovac.icon("ground")
+        kind = {"Fixed": "j_rigid", "Revolute": "j_revolute", "Slider": "j_slider", "Cylindrical": "j_cylindrical",
+                "Ball": "j_ball", "Distance": "j_planar"}.get(getattr(obj, "JointType", ""), "joint")
+        return kovac.icon(kind)
     return kovac.icon(ICONS.get(r, "feature"))
 
 
@@ -100,13 +123,27 @@ def create():
     from PySide import QtCore, QtGui, QtWidgets
 
     import kovac
-    from kovac import commands
+    from kovac import commands, palette
 
     OBJ, VIEW, MEMBERS = QtCore.Qt.UserRole, QtCore.Qt.UserRole + 1, QtCore.Qt.UserRole + 2
     EYE = 1
 
     def qicon(name):
         return QtGui.QIcon(kovac.icon(name))
+
+    class SelectionSync:
+        """FreeCAD's selection observer for the tree, kept off the tree itself: its callbacks are
+        named setSelection and clearSelection, the same as QAbstractItemView's own methods, and
+        on the widget they replaced them -- Qt's click-to-select called our re-sync instead, which
+        read back FreeCAD's still-empty selection, so no row could be selected by mouse at all."""
+
+        def __init__(self, tree):
+            self.tree = tree
+
+        def addSelection(self, *_):
+            self.tree.from_selection()
+
+        removeSelection = setSelection = clearSelection = addSelection
 
     class Tree(QtWidgets.QTreeWidget):
         def __init__(self):
@@ -134,7 +171,8 @@ def create():
             self.timer = QtCore.QTimer(self, singleShot=True, interval=30)
             self.timer.timeout.connect(self.rebuild)
             App.addDocumentObserver(self)
-            Gui.Selection.addObserver(self)
+            self.sel_observer = SelectionSync(self)
+            Gui.Selection.addObserver(self.sel_observer)
             self.rebuild()
 
         # ---------------------------------------------------- build
@@ -193,6 +231,10 @@ def create():
                 folder.setData(0, MEMBERS, [(o.Document.Name, o.Name) for o in members])
                 for o in members:
                     it = self.item(folder, o.Label, o, QtGui.QIcon(item_icon(o)), o.Visibility)
+                    problem = getattr(o, "KovacStatus", "")
+                    if problem:                 # a joint whose reference is gone
+                        it.setForeground(0, QtGui.QBrush(QtGui.QColor(palette.SEMANTIC["error"])))
+                        it.setToolTip(0, problem)
                     for sk in body_sketches(o) if r == "body" else []:
                         self.item(it, sk.Label, sk, QtGui.QIcon(item_icon(sk)), sk.Visibility)
 
@@ -235,35 +277,84 @@ def create():
             if col == EYE:
                 return
             o = self.obj(it)
-            if o is not None and role(o) == "component":
-                Gui.ActiveDocument.ActiveView.setActiveObject("part", o)
+            from kovac import curve3d
+            if curve3d.is_curve(o):
+                curve3d.edit(o)
+            elif o is not None and role(o) == "component" and o.TypeId == "App::Part":
+                from kovac import components          # double-click again: back to the top
+                view = Gui.ActiveDocument.ActiveView
+                now = view.getActiveObject("part") if hasattr(view, "getActiveObject") else None
+                components.set_active(o.Document, None if now is not None and now.Name == o.Name else o)
                 self.rebuild()
+            elif o is not None and role(o) == "joint" and hasattr(o, "KovacOrigin1"):
+                from kovac import assemble
+                assemble.edit_joint(o)
             elif it.data(0, VIEW):
                 Gui.activeView().setCamera(App.ActiveDocument.Meta[META_VIEW + it.data(0, VIEW)])
 
         def menu(self, pos):
             it = self.itemAt(pos)
             o = self.obj(it) if it else None
+            sel = [x for x in (self.obj(s) for s in self.selectedItems()) if x is not None]
             m = QtWidgets.QMenu(self)
             if o is not None:
                 m.addAction("Rename", lambda: self.editItem(it, 0))
                 m.addAction("Hide" if o.Visibility else "Show", lambda: (setattr(o, "Visibility", not o.Visibility), self.rebuild()))
                 if role(o) == "component":
-                    m.addAction("Activate", lambda: self.double(it, 0))
+                    from kovac import assemble, joints
+                    if o.TypeId == "App::Part":
+                        m.addAction("Activate", lambda: self.double(it, 0))
+                    m.addAction("New instance", lambda: assemble.instance([o]))
+                    m.addAction("Move…", lambda: assemble.move_component(o))
+                    grounded = o in joints.grounded(o.Document)
+                    m.addAction("Unground" if grounded else "Ground", lambda: assemble.ground([o], not grounded))
+                if role(o) == "joint" and hasattr(o, "KovacOrigin1"):
+                    from kovac import assemble
+                    m.addAction("Edit joint…", lambda: assemble.edit_joint(o))
                 if role(o) == "body":
                     m.addAction("Material…", lambda: commands.run("Kovac_Material"))
-                m.addAction("Delete", lambda: self.delete(o))
+                if len(sel) > 1 and o in sel:
+                    m.addAction("Delete %d selected" % len(sel), self.delete_selected)
+                else:
+                    m.addAction("Delete", lambda: self.delete(o))
             m.addAction("Save current view…", self.save_view)
             m.exec(self.viewport().mapToGlobal(pos))
 
+        def keyPressEvent(self, ev):
+            if ev.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
+                self.delete_selected()
+                return
+            super().keyPressEvent(ev)
+
         def delete(self, o):
+            self.delete_selected([o])
+
+        def delete_selected(self, objs=None):
+            """Every selected item (or `objs`, for the single-item context menu action and the
+            Delete / Backspace key), as one undo step."""
             from kovac import model
+            objs = objs if objs is not None else [self.obj(it) for it in self.selectedItems()]
+            objs = list(dict.fromkeys(o for o in objs if o is not None))
+            if not objs:
+                return
+            doc = objs[0].Document
+            hist = model.items(doc)
+            objs.sort(key=lambda o: hist.index(o) if o in hist else -1, reverse=True)   # dependents first
+            label = "Delete %s" % objs[0].Label if len(objs) == 1 else "Delete %d items" % len(objs)
             try:
-                with commands.transaction("Delete %s" % o.Label, o.Document):
-                    if o in model.items(o.Document):
-                        model.remove(o.Document, o)
-                    else:
-                        o.Document.removeObject(o.Name)
+                with commands.transaction(label, doc):
+                    for o in objs:
+                        if doc.getObject(o.Name) is None:      # already gone (e.g. with its body)
+                            continue
+                        if o in model.items(doc):
+                            model.remove(doc, o)
+                        elif role(o) == "component":
+                            from kovac import components
+                            note = components.remove(o)
+                            if note:
+                                commands.report(note)
+                        else:
+                            doc.removeObject(o.Name)
             except Exception as e:
                 commands.report(e)
 
@@ -297,7 +388,6 @@ def create():
                 it.setSelected(it.data(0, OBJ) in names)
             self.syncing = False
 
-        addSelection = removeSelection = setSelection = clearSelection = from_selection
 
         # ---------------------------------------------------- document observer
         def slotCreatedObject(self, _o):

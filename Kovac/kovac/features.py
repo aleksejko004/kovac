@@ -19,19 +19,25 @@ BIG = 1e5
 # ---------------------------------------------------------------- shared helpers
 
 def _sketch_regions(fp, sketch):
-    found = regions.of_sketch(sketch)
+    found = regions.of_sketch(sketch, local=True)
     if not found:
         raise ValueError("%s has no closed profile. Close the outline in the sketch." % sketch.Label)
     if fp.Regions:
         return regions.pick(found, list(fp.Regions), [tuple(p) for p in getattr(fp, "RegionPoints", [])])
-    return regions.default(found)
+    auto = regions.default(found)
+    # A sketch with one region (holes aside) has nothing to choose between, so picking none
+    # is as good as picking it -- the common case stays a one-click extrude. More than one and
+    # picking none is ambiguous: say so rather than silently combining every one of them.
+    if len(auto) > 1:
+        raise ValueError("%s has %d separate regions. Click the ones to use." % (sketch.Label, len(auto)))
+    return auto
 
 
 def profiles(fp, state):
     """([Region], profile normal) from the picked sketch regions or flat body faces."""
     if fp.Profile is not None:
         rs = _sketch_regions(fp, fp.Profile)
-        n = fp.Profile.getGlobalPlacement().Rotation.multVec(V(0, 0, 1))
+        n = regions.placement(fp.Profile, True).Rotation.multVec(V(0, 0, 1))
         return rs, n
     if not fp.ProfileFaces:
         raise ValueError("Pick a sketch profile or a flat face to extrude.")
@@ -105,7 +111,7 @@ class Extrude(model.Feature):
     kind, icon = "Extrude", "extrude"
 
     def setup(self, fp):
-        fp.addProperty("App::PropertyLink", "Profile", "Profile", "sketch")
+        fp.addProperty("App::PropertyLinkGlobal", "Profile", "Profile", "sketch")
         fp.addProperty("App::PropertyStringList", "Regions", "Profile", "picked region keys (empty = automatic)")
         fp.addProperty("App::PropertyVectorList", "RegionPoints", "Profile", "a point inside each picked region", 4)
         fp.addProperty("App::PropertyStringList", "ProfileFaces", "Profile", "flat faces used as profile")
@@ -197,7 +203,7 @@ def axis_line(fp, state, sketch=None):
         for i in range(len(sk.Geometry)):
             if sk.getGeometryId(i) == gid:
                 g = sk.Geometry[i]
-                pl = sk.getGlobalPlacement()
+                pl = regions.placement(sk, True)
                 p0, p1 = pl.multVec(g.StartPoint), pl.multVec(g.EndPoint)
                 return p0, (p1 - p0).normalize()
         raise topo.Broken("the sketch line used as the axis was deleted")
@@ -212,7 +218,7 @@ class Revolve(model.Feature):
     kind, icon = "Revolve", "revolve"
 
     def setup(self, fp):
-        fp.addProperty("App::PropertyLink", "Profile", "Profile", "sketch")
+        fp.addProperty("App::PropertyLinkGlobal", "Profile", "Profile", "sketch")
         fp.addProperty("App::PropertyStringList", "Regions", "Profile", "")
         fp.addProperty("App::PropertyVectorList", "RegionPoints", "Profile", "", 4)
         fp.addProperty("App::PropertyStringList", "ProfileFaces", "Profile", "")
@@ -251,10 +257,13 @@ class Revolve(model.Feature):
 # ---------------------------------------------------------------- Sweep / Loft
 
 def sketch_wire(sketch):
+    from kovac import curve3d
+    if curve3d.is_curve(sketch):            # already in place, in 3D
+        return Part.Wire(sketch.Shape.Edges)
     edges = [g.toShape() for i, g in enumerate(sketch.Geometry)
              if not sketch.getConstruction(i) and not isinstance(g, Part.Point)]
     w = Part.Wire(Part.__sortEdges__(edges))
-    w.transformShape(sketch.getGlobalPlacement().toMatrix())
+    w.transformShape(regions.placement(sketch, True).toMatrix())
     return w
 
 
@@ -262,11 +271,11 @@ class Sweep(model.Feature):
     kind, icon = "Sweep", "sweep"
 
     def setup(self, fp):
-        fp.addProperty("App::PropertyLink", "Profile", "Profile", "sketch")
+        fp.addProperty("App::PropertyLinkGlobal", "Profile", "Profile", "sketch")
         fp.addProperty("App::PropertyStringList", "Regions", "Profile", "")
         fp.addProperty("App::PropertyVectorList", "RegionPoints", "Profile", "", 4)
         fp.addProperty("App::PropertyStringList", "ProfileFaces", "Profile", "")
-        fp.addProperty("App::PropertyLink", "Path", "Sweep", "sketch holding the path")
+        fp.addProperty("App::PropertyLinkGlobal", "Path", "Sweep", "sketch holding the path")
         fp.addProperty("App::PropertyStringList", "PathEdges", "Sweep", "edges used as the path")
         fp.addProperty("App::PropertyBool", "Frenet", "Sweep", "keep the profile's twist following the path").Frenet = True
         model.add_operation_properties(fp)
@@ -301,7 +310,7 @@ class Loft(model.Feature):
     kind, icon = "Loft", "loft"
 
     def setup(self, fp):
-        fp.addProperty("App::PropertyLinkList", "Sections", "Loft", "sketches, in order")
+        fp.addProperty("App::PropertyLinkListGlobal", "Sections", "Loft", "sketches, in order")
         fp.addProperty("App::PropertyBool", "Ruled", "Loft", "straight walls between sections")
         fp.addProperty("App::PropertyBool", "Closed", "Loft", "connect the last section back to the first")
         model.add_operation_properties(fp)
@@ -309,7 +318,7 @@ class Loft(model.Feature):
     def tool(self, fp, state):
         if len(fp.Sections) < 2:
             raise ValueError("A loft needs at least two sections.")
-        firsts = [regions.default(regions.of_sketch(s)) for s in fp.Sections]
+        firsts = [regions.default(regions.of_sketch(s, local=True)) for s in fp.Sections]
         if any(len(r) != 1 for r in firsts):
             raise ValueError("Each loft section must have exactly one closed profile.")
         wires = [r[0].face.OuterWire for r in firsts]
@@ -409,7 +418,7 @@ class Hole(model.Feature):
 
     def setup(self, fp):
         fp.addProperty("App::PropertyString", "Face", "Placement", "face the holes start on")
-        fp.addProperty("App::PropertyLink", "Points", "Placement", "sketch whose points are hole centres")
+        fp.addProperty("App::PropertyLinkGlobal", "Points", "Placement", "sketch whose points are hole centres")
         fp.addProperty("App::PropertyVectorList", "Positions", "Placement", "hole centres (when no sketch)")
         fp.addProperty("App::PropertyEnumeration", "HoleType", "Hole", "")
         fp.HoleType = HOLE_TYPES
@@ -432,7 +441,7 @@ class Hole(model.Feature):
 
     def centres(self, fp, face):
         if fp.Points is not None:
-            pts = regions.sketch_points(fp.Points)
+            pts = regions.sketch_points(fp.Points, local=True)
         else:
             pts = list(fp.Positions)
         if not pts:

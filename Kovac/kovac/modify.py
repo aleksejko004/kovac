@@ -348,6 +348,89 @@ class FacePull(model.Feature):
         return state
 
 
+class MoveFace(model.Feature):
+    """Move or tilt one face; the rest of the part follows it.
+
+    A flat face: the part's material over the face (the face's own column, both ways along its
+    normal) is rebuilt up to the face's new plane -- so it pushes, pulls and tilts, and the
+    faces around it stretch or shorten to meet it. They stay straight along the old normal,
+    which is exact for the usual square-sided case and approximate for drafted ones. A round
+    face (a hole or a boss): the old cylinder is filled in (a hole) or taken away (a boss) and a
+    new one cut or added where it was moved to, so it slides sideways and tilts; a hole open at
+    an end stays open there."""
+    kind, icon = "MoveFace", "facepull"
+
+    def setup(self, fp):
+        fp.addProperty("App::PropertyString", "Face", "Move Face", "")
+        fp.addProperty("App::PropertyPlacement", "Move", "Move Face", "offset and turn")
+        fp.addProperty("App::PropertyVector", "Pivot", "Move Face", "the turn is about this point")
+
+    def apply(self, fp, state):
+        bid = topo.loads(fp.Face)["b"]
+        src, face = topo.element(state, fp.Face)
+        m = App.Placement(fp.Move.Base, fp.Move.Rotation, fp.Pivot)
+        own = src.tags[[i for i, f in enumerate(src.shape.Faces) if f.isSame(face)][0]]
+        S = src.shape
+        D = S.BoundBox.DiagonalLength * 2 + fp.Move.Base.Length + 10
+        surf = face.Surface
+        if isinstance(surf, Part.Plane):
+            shape, tool = self._plane(fp, S, face, m, D, own)
+        elif isinstance(surf, Part.Cylinder):
+            shape, tool = self._cylinder(fp, S, face, m, D, own)
+        else:
+            raise ValueError("Move Face moves flat and round (cylindrical) faces.")
+        shape = model._clean(shape)
+        state[bid] = topo.Body(shape, topo.inherit(shape, [src, tool]))
+        return state
+
+    @staticmethod
+    def _plane(fp, S, face, m, D, own):
+        n = face.normalAt(*face.Surface.parameter(face.CenterOfMass))
+        column = face.copy()
+        column.translate(-n * D)
+        column = column.extrude(n * 2 * D)
+        outside = face.extrude(n * D)
+        p2, n2 = m.multVec(face.CenterOfMass), m.Rotation.multVec(n)
+        keep = _halfspace(p2, -n2, D * 2 + (p2 - S.BoundBox.Center).Length)
+        rebuilt = S.common(column).fuse(outside).common(keep)
+        shape = S.cut(column).fuse(rebuilt)
+        tags = [own if topo.same_support(f, Part.Plane(p2, n2).toShape()) else "%s:s%d" % (fp.Name, k)
+                for k, f in enumerate(rebuilt.Faces)]
+        return shape, topo.Body(rebuilt, tags)
+
+    @staticmethod
+    def _cylinder(fp, S, face, m, D, own):
+        surf = face.Surface
+        a = surf.Axis.normalize()
+        ts = [(v.Point - surf.Center).dot(a) for v in face.Vertexes] or [0.0]
+        if face.Edges:
+            ts += [(face.Edges[0].valueAt(face.Edges[0].FirstParameter) - surf.Center).dot(a)]
+        t0, t1 = min(ts), max(ts)
+        if t1 - t0 < 1e-9:
+            bb = face.BoundBox
+            t0, t1 = -bb.DiagonalLength, bb.DiagonalLength
+        base = surf.Center + a * t0
+        old = Part.makeCylinder(surf.Radius, t1 - t0, base, a)
+        p = topo.sample_points(face)[0]
+        radial = (p - surf.Center) - a * (p - surf.Center).dot(a)
+        hole = face.normalAt(*face.Surface.parameter(p)).dot(radial) < 0
+        eps = max(surf.Radius * 0.05, 1e-3)
+        open0 = not S.isInside(base - a * eps, 1e-7, False)
+        open1 = not S.isInside(base + a * (t1 - t0 + eps), 1e-7, False)
+        if hole:                                   # an open end stays open after a tilt or a slide
+            lo, hi = (D if open0 else 0.0), (D if open1 else 0.0)
+        else:                                      # a boss: its foot reaches into the part it stands on
+            lo, hi = (0.0 if open0 else surf.Radius), (0.0 if open1 else surf.Radius)
+        new = Part.makeCylinder(surf.Radius, t1 - t0 + lo + hi, base - a * lo, a)
+        new.transformShape(m.toMatrix())
+        if hole:
+            shape = S.fuse(old).cut(new)
+        else:
+            shape = S.cut(old).fuse(new)
+        tags = [own if isinstance(f.Surface, Part.Cylinder) else "%s:cap%d" % (fp.Name, k) for k, f in enumerate(new.Faces)]
+        return shape, topo.Body(new, tags)
+
+
 class DeleteFace(model.Feature):
     kind, icon = "DeleteFace", "deleteface"
 
@@ -417,23 +500,49 @@ def _halfspace(o, n, size):
     return b
 
 
+def _split_tool(fp, prop, state, body_shape):
+    """The solid to split body_shape with: a half-space for 'XY'/'XZ'/'YZ', a datum plane or a
+    flat face (as plane_of, which a curved face fails); the whole analytic surface's own solid
+    -- not just the picked patch -- for a cylindrical or spherical face, sized to reach past
+    body_shape everywhere. A full cylinder or sphere already bounds a solid the same way a
+    plane already bounds a half-space; there is no equivalent closed form for a cone or a
+    freeform face, so those still need a flat face or a plane."""
+    bb = body_shape.BoundBox
+    size = bb.DiagonalLength * 4
+    v = getattr(fp, prop)
+    if v in ("XY", "XZ", "YZ") or (fp.Document.getObject(v) if v and not v.startswith("{") else None) is not None:
+        o, n = plane_of(fp, prop, state)
+        return _halfspace(o, n, size + (o - bb.Center).Length)
+    _, face = topo.element(state, v)
+    surf = face.Surface
+    if isinstance(surf, Part.Plane):
+        o, n = surf.Position, face.normalAt(*surf.parameter(face.CenterOfMass))
+        return _halfspace(o, n, size + (o - bb.Center).Length)
+    if isinstance(surf, Part.Cylinder):
+        axis = surf.Axis.normalize()
+        return Part.makeCylinder(surf.Radius, size, surf.Center - axis * (size / 2), axis)
+    if isinstance(surf, Part.Sphere):
+        return Part.makeSphere(surf.Radius, surf.Center)
+    raise ValueError("Pick a plane, a flat face, or a cylindrical or spherical face.")
+
+
 class SplitBody(model.Feature):
     kind, icon = "SplitBody", "split"
 
     def setup(self, fp):
         fp.addProperty("App::PropertyString", "Body", "Split", "body id")
-        fp.addProperty("App::PropertyString", "Plane", "Split", "XY/XZ/YZ, a plane, or a flat face")
+        fp.addProperty("App::PropertyString", "Plane", "Split",
+                       "XY/XZ/YZ, a plane, a flat face, or a cylindrical/spherical face")
 
     def apply(self, fp, state):
         if fp.Body not in state:
             raise topo.Broken("the body to split no longer exists")
         src = state[fp.Body]
-        o, n = plane_of(fp, "Plane", state)
-        size = src.shape.BoundBox.DiagonalLength * 4 + (o - src.shape.BoundBox.Center).Length
-        cut = topo.Body(_halfspace(o, n, size), ["%s:split" % fp.Name] * 6)
+        tool = _split_tool(fp, "Plane", state, src.shape)
+        cut = topo.Body(tool, ["%s:split" % fp.Name] * len(tool.Faces))
         pos, neg = src.shape.common(cut.shape), src.shape.cut(cut.shape)
         if not pos.Solids or not neg.Solids:
-            raise ValueError("The plane does not cross the body.")
+            raise ValueError("The split tool does not cross the body.")
         state[fp.Body] = topo.Body(pos, topo.inherit(pos, [src, cut]))
         state[model.new_body_id(fp)] = topo.Body(neg, topo.inherit(neg, [src, cut]))
         return state
@@ -447,12 +556,15 @@ class Transform(model.Feature):
         fp.addProperty("App::PropertyStringList", "Bodies", "Move", "body ids")
         fp.addProperty("App::PropertyPlacement", "Move", "Move", "translation and rotation")
         fp.addProperty("App::PropertyBool", "Copy", "Move", "keep the original")
+        fp.addProperty("App::PropertyVector", "Pivot", "Move", "the turn is about this point")
 
     def apply(self, fp, state):
+        from kovac import move
+        m = move.effective(fp)
         for k, bid in enumerate(fp.Bodies):
             if bid not in state:
                 raise topo.Broken("a body to move no longer exists")
-            moved = state[bid].transformed(fp.Move)
+            moved = state[bid].transformed(m)
             if fp.Copy:
                 moved = topo.Body(moved.shape, [t + "@" + fp.Name for t in moved.tags])
                 state[model.new_body_id(fp, k)] = moved
@@ -511,15 +623,52 @@ class Mirror(model.Feature):
 
 # ---------------------------------------------------------------- Pattern
 
+def _path_points(wire, count):
+    """count points at count-1 equal arc-length steps along wire: [(point, tangent direction)]."""
+    edges = wire.Edges
+    lens = [e.Length for e in edges]
+    total = sum(lens)
+    if total < 1e-9:
+        raise ValueError("The path has no length.")
+    out = []
+    for i in range(count):
+        s = total * i / max(count - 1, 1) if count > 1 else 0.0
+        acc = 0.0
+        for e, length in zip(edges, lens):
+            if s <= acc + length + 1e-9 or e is edges[-1]:
+                local = min(max(s - acc, 0.0), length)
+                p0 = e.FirstParameter
+                param = e.Curve.parameterAtDistance(local, p0) if hasattr(e.Curve, "parameterAtDistance") \
+                    else p0 + (e.LastParameter - p0) * (local / length if length > 1e-9 else 0)
+                out.append((e.valueAt(param), e.tangentAt(param)))
+                break
+            acc += length
+    return out
+
+
+def _path_placements(wire, count, align):
+    """Placements relative to the path's own start: identical at count=1 (no instance moves),
+    so the source feature, wherever it already sits, is just carried along by the same amount
+    every other instance is -- the same 'nothing changes at index 0' convention Rectangular and
+    Circular already use."""
+    pts = _path_points(wire, count)
+
+    def frame(p, t):
+        rot = App.Rotation(V(1, 0, 0), t) if align and t.Length > 1e-9 else App.Rotation()
+        return App.Placement(p, rot)
+    base = frame(*pts[0]).inverse()
+    return [frame(p, t).multiply(base) for p, t in pts]
+
+
 class Pattern(model.Feature):
     """Repeat features (their tool shape, same operation) or bodies (as new bodies)."""
     kind, icon = "Pattern", "pattern"
 
     def setup(self, fp):
-        fp.addProperty("App::PropertyLinkList", "Sources", "Pattern", "features to repeat")
+        fp.addProperty("App::PropertyLinkListGlobal", "Sources", "Pattern", "features to repeat")
         fp.addProperty("App::PropertyStringList", "Bodies", "Pattern", "or: body ids to repeat")
         fp.addProperty("App::PropertyEnumeration", "Type", "Pattern", "")
-        fp.Type = ["Rectangular", "Circular"]
+        fp.Type = ["Rectangular", "Circular", "Path"]
         fp.addProperty("App::PropertyVector", "Direction1", "Rectangular", "").Direction1 = V(1, 0, 0)
         fp.addProperty("App::PropertyIntegerConstraint", "Count1", "Rectangular", "").Count1 = (2, 1, 10000, 1)
         fp.addProperty("App::PropertyDistance", "Spacing1", "Rectangular", "").Spacing1 = 10
@@ -530,6 +679,9 @@ class Pattern(model.Feature):
         fp.addProperty("App::PropertyVector", "AxisPoint", "Circular", "a point on the axis (X/Y/Z)")
         fp.addProperty("App::PropertyIntegerConstraint", "Count", "Circular", "").Count = (4, 1, 10000, 1)
         fp.addProperty("App::PropertyAngle", "TotalAngle", "Circular", "").TotalAngle = 360
+        fp.addProperty("App::PropertyLinkGlobal", "Path", "Path", "sketch holding the path")
+        fp.addProperty("App::PropertyStringList", "PathEdges", "Path", "or: edges used as the path")
+        fp.addProperty("App::PropertyBool", "Align", "Path", "rotate instances to follow the path").Align = True
         fp.addProperty("App::PropertyIntegerList", "Skip", "Pattern", "instance numbers to leave out")
 
     def placements(self, fp, state):
@@ -541,7 +693,7 @@ class Pattern(model.Feature):
             for j in range(fp.Count2):
                 for i in range(fp.Count1):
                     out.append(App.Placement(d1 * (i * fp.Spacing1.Value) + d2 * (j * fp.Spacing2.Value), App.Rotation()))
-        else:
+        elif fp.Type == "Circular":
             if fp.Axis in ("X", "Y", "Z"):
                 base, axis = V(fp.AxisPoint), V(*[1 if c == fp.Axis else 0 for c in "XYZ"])
             else:
@@ -553,7 +705,17 @@ class Pattern(model.Feature):
             for i in range(n):
                 rot = App.Rotation(axis, step * i)
                 out.append(App.Placement(base - rot.multVec(base), rot))
+        else:
+            out = _path_placements(self._path_wire(fp, state), fp.Count, fp.Align)
         return out
+
+    def _path_wire(self, fp, state):
+        if fp.Path is not None:
+            from kovac import features
+            return features.sketch_wire(fp.Path)
+        if fp.PathEdges:
+            return Part.Wire(Part.__sortEdges__([topo.element(state, r)[1] for r in model.refs(fp, "PathEdges")]))
+        raise ValueError("Pick a path to pattern along.")
 
     def apply(self, fp, state):
         pls = self.placements(fp, state)
@@ -565,8 +727,9 @@ class Pattern(model.Feature):
                 tool, hint = src.Proxy.tool(src, model.input_state(src))
                 op = src.ResolvedOperation.replace(" (auto)", "") or "Join"
 
-                class _Op:   # apply_tool reads these
+                class _Op:   # apply_tool reads these (and the source's component, for its scope)
                     Operation, Targets, ResolvedOperation, Name = op, [], op, fp.Name
+                    Document, Profile, Home = fp.Document, getattr(src, "Profile", None), getattr(src, "Home", "")
                 for k, pl in instances:
                     inst = tool.transformed(pl)
                     inst = topo.Body(inst.shape, ["%s@%s.%d" % (t, fp.Name, k) for t in inst.tags])

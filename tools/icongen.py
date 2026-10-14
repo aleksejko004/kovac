@@ -779,6 +779,22 @@ def offset(g):
     g.poly(_rect2((4, 4.5), (20, 19.5)), stroke=g.t["accent"], width=STROKE)
 
 
+def offset_round(g):
+    """Offset corner choice: the outer copy's corners rounded (arc join)."""
+    g.poly(_rect2((8.5, 9), (15.5, 15)), stroke=g.t["icon_line"], width=STROKE)
+    r, (x0, y0, x1, y1) = 4.5, (4, 4.5, 20, 19.5)
+    pts = (_arc2((x1 - r, y0 + r), r, 0, 90, 6) + _arc2((x0 + r, y0 + r), r, 90, 180, 6)
+           + _arc2((x0 + r, y1 - r), r, 180, 270, 6) + _arc2((x1 - r, y1 - r), r, 270, 360, 6))
+    g.poly(pts, stroke=g.t["accent"], width=STROKE)
+
+
+def offset_sharp(g):
+    """Offset corner choice: the outer copy's sides extended until they meet (intersection join)."""
+    g.poly(_rect2((8.5, 9), (15.5, 15)), stroke=g.t["icon_line"], width=STROKE)
+    g.poly(_rect2((4, 4.5), (20, 19.5)), stroke=g.t["accent"], width=STROKE)
+    g.handle((20, 4.5))
+
+
 def sk_mirror(g):
     g.line((12, 3), (12, 21), g.t["icon_line"], HAIR, dash="2,1.5")
     g.poly([(4, 17), (10, 17), (10, 7)], stroke=g.t["icon_line"], width=STROKE)
@@ -907,6 +923,13 @@ def c_symmetric(g):
     g.line((5, 12), (19, 12), g.t["text_muted"], HAIR)
     _dot(g, (5, 12), 2.4)
     _dot(g, (19, 12), 2.4)
+
+
+def c_midpoint(g):
+    g.line((4, 18), (20, 6), g.t["icon_line"])
+    g.handle((4, 18))
+    g.handle((20, 6))
+    _dot(g, (12, 12), 3.2)
 
 
 def c_block(g):
@@ -1190,6 +1213,96 @@ def export_dxf(g):
     g.poly(g.ellipse2d((10, 10), 2, 2, 16), stroke=g.t["icon_line"], width=HAIR)
 
 
+def new_component(g):
+    """New Component: a part with an accent outline box around it (the container)."""
+    g.prism(rect_xy(1.5, 1.5, 0, 6, 6), (0, 0, 4))
+    box = rect_xy(-0.5, -0.5, 0, 10, 10)
+    g.poly([g.p(q) for q in box], stroke=g.t["accent"], width=STROKE, dash="2,1.5")
+    top = rect_xy(-0.5, -0.5, 6.5, 10, 10)
+    g.poly([g.p(q) for q in top], stroke=g.t["accent"], width=STROKE, dash="2,1.5")
+
+
+def instance(g):
+    """New Instance: the part, and a linked copy beside it (accent)."""
+    g.prism(rect_xy(0, 0, 0, 6, 6), (0, 0, 4))
+    g.prism(rect_xy(9, -1, 0, 6, 6), (0, 0, 4), accent=[0, 1, 2, 3])
+
+
+def ground(g):
+    """Ground: a part standing on a hatched ground line (the accent)."""
+    g.prism(rect_xy(2, 2, 0, 7, 7), (0, 0, 5))
+    corners = [g.p(q) for q in rect_xy(2, 2, 0, 7, 7)]
+    y = max(c[1] for c in corners) + 1.2
+    x0, x1 = min(c[0] for c in corners) - 2.5, max(c[0] for c in corners) + 2.5
+    g.line((x0, y), (x1, y), g.t["accent"], STROKE)
+    for k in range(5):
+        x = x0 + 2 + (x1 - x0 - 2) * k / 4
+        g.line((x, y + 0.8), (x - 2.4, y + 3.2), g.t["accent"], HAIR)
+
+
+def drag_part(g):
+    """Drag: a jointed part pushed along its motion (accent arrow)."""
+    g.line(g.p((5, 5, -1)), g.p((5, 5, 12)), g.t["icon_line"], HAIR, dash="2,1.5")
+    g.prism(rect_xy(0, 0, 0, 10, 10), (0, 0, 2.5))
+    g.prism(rect_xy(2.5, 2.5, 5.5, 5, 5), (0, 0, 3.5))
+    g.arrow(g.p((10, 6, 7)), g.p((14, 12, 7)))
+
+
+def _jt_base(g):
+    g.prism(rect_xy(0, 0, 0, 10, 10), (0, 0, 2.5))
+
+
+def j_rigid(g):
+    _jt_base(g)
+    g.prism(rect_xy(2.5, 2.5, 2.5, 5, 5), (0, 0, 4), accent=[0, 1, 2, 3])
+
+
+def j_revolute(g):
+    _jt_base(g)
+    g.line(g.p((5, 5, 2.5)), g.p((5, 5, 12)), g.t["icon_line"], HAIR, dash="2,1.5")
+    g.cylinder((5, 5, 2.5), 2.2, 4)
+    arc = [g.p(q) for q in arc_pts((5, 5, 8.5), 4.8, -40, 125)]
+    g.poly(arc[:-2], stroke=g.t["accent"], width=STROKE, closed=False)
+    g.arrow(arc[-4], arc[-1])
+
+
+def j_slider(g):
+    _jt_base(g)
+    g.prism(rect_xy(3.5, 3.5, 2.5, 3, 3), (0, 0, 3))
+    g.arrow(g.p((5, 5, 6)), g.p((5, 5, 13)))
+
+
+def j_cylindrical(g):
+    _jt_base(g)
+    g.cylinder((5, 5, 2.5), 2.2, 4)
+    arc = [g.p(q) for q in arc_pts((5, 5, 5), 4.8, -20, 140)]
+    g.poly(arc, stroke=g.t["accent"], width=STROKE, closed=False)
+    g.arrow(g.p((5, 5, 7)), g.p((5, 5, 13)))
+
+
+def j_ball(g):
+    _jt_base(g)
+    c = g.p((5, 5, 5.5))
+    g.poly(g.ellipse2d(c, 3.6, 3.6), fill=g.t["icon_top"], stroke=g.t["icon_line"])
+    g.poly(g.ellipse2d(c, 5.4, 2.2), stroke=g.t["accent"], width=STROKE)
+    g.poly(g.ellipse2d(c, 2.2, 5.4), stroke=g.t["accent"], width=STROKE)
+
+
+def j_planar(g):
+    _jt_base(g)
+    g.prism(rect_xy(3.5, 3.5, 2.5, 3, 3), (0, 0, 1.5))
+    g.arrow(g.p((6.5, 5, 4)), g.p((13, 5, 4)))
+    g.arrow(g.p((5, 6.5, 4)), g.p((5, 13, 4)))
+
+
+def flip(g):
+    """Flip: a part turned over (accent half-turn arrow)."""
+    g.prism(rect_xy(1, 1, 0, 8, 8), (0, 0, 3), accent=[])
+    arc = [g.p(q) for q in arc_pts((5, 5, 3), 6.5, 200, 340, plane="xz")]
+    g.poly(arc[:-2], stroke=g.t["accent"], width=STROKE, closed=False)
+    g.arrow(arc[-4], arc[-1])
+
+
 ICONS = {
     "extrude": (extrude, "feature"), "revolve": (revolve, "feature"), "fillet": (fillet, "feature"),
     "hole": (hole, "feature"), "shell": (shell, "feature"),
@@ -1219,10 +1332,11 @@ ICONS = {
     "arc": (arc, "sketch"), "arc3": (arc3, "sketch"), "polygon": (polygon, "sketch"), "slot": (slot, "sketch"),
     "ellipse": (ellipse, "sketch"), "spline": (spline, "sketch"), "spoint": (spoint, "sketch"), "sk_fillet": (sk_fillet, "sketch"),
     "sk_chamfer": (sk_chamfer, "sketch"), "trim": (trim, "sketch"), "extend": (extend, "sketch"), "sk_split": (sk_split, "sketch"),
-    "offset": (offset, "sketch"), "sk_mirror": (sk_mirror, "sketch"), "sk_move": (sk_move, "sketch"), "sk_rotate": (sk_rotate, "sketch"),
+    "offset": (offset, "sketch"), "offset_round": (offset_round, "sketch"), "offset_sharp": (offset_sharp, "sketch"), "sk_mirror": (sk_mirror, "sketch"), "sk_move": (sk_move, "sketch"), "sk_rotate": (sk_rotate, "sketch"),
     "sk_scale": (sk_scale, "sketch"), "sk_array": (sk_array, "sketch"), "construction": (construction, "sketch"), "project": (project, "sketch"),
     "carbon": (carbon, "sketch"), "sk_look": (sk_look, "sketch"), "sk_section": (sk_section, "sketch"), "dimension": (dimension, "sketch"),
-    "c_coincident": (c_coincident, "sketch"), "c_pointon": (c_pointon, "sketch"), "c_horizontal": (c_horizontal, "sketch"), "c_vertical": (c_vertical, "sketch"),
+    "c_coincident": (c_coincident, "sketch"), "c_pointon": (c_pointon, "sketch"), "c_midpoint": (c_midpoint, "sketch"),
+    "c_horizontal": (c_horizontal, "sketch"), "c_vertical": (c_vertical, "sketch"),
     "c_parallel": (c_parallel, "sketch"), "c_perpendicular": (c_perpendicular, "sketch"), "c_tangent": (c_tangent, "sketch"), "c_equal": (c_equal, "sketch"),
     "c_symmetric": (c_symmetric, "sketch"), "c_block": (c_block, "sketch"), "c_lock": (c_lock, "sketch"), "c_hdist": (c_hdist, "sketch"),
     "c_vdist": (c_vdist, "sketch"), "c_dist": (c_dist, "sketch"), "c_radius": (c_radius, "sketch"), "c_diameter": (c_diameter, "sketch"),
@@ -1236,6 +1350,11 @@ ICONS = {
     "section_view": (section_view, "drawing"), "detail_view": (detail_view, "drawing"), "callout": (callout, "drawing"),
     "balloon": (balloon, "drawing"), "parts_list": (parts_list, "drawing"), "export_pdf": (export_pdf, "file"),
     "export_dxf": (export_dxf, "file"),
+    # assemblies
+    "new_component": (new_component, "assembly"), "instance": (instance, "assembly"), "ground": (ground, "assembly"),
+    "drag_part": (drag_part, "assembly"), "j_rigid": (j_rigid, "assembly"), "j_revolute": (j_revolute, "assembly"),
+    "j_slider": (j_slider, "assembly"), "j_cylindrical": (j_cylindrical, "assembly"), "j_ball": (j_ball, "assembly"),
+    "j_planar": (j_planar, "assembly"), "flip": (flip, "assembly"),
 }
 
 

@@ -305,6 +305,21 @@ class Torture(unittest.TestCase):
         self.assertIn("Missing reference", h.Status)
         self.assertIn("ambiguous", h.Status)
 
+    def test_24_cut_hole_moved_under_chamfer(self):
+        """A round hole cut by an extrude keeps its wall's name when it moves and grows."""
+        self.plate()
+        hole = sketch(self.doc, [("circle", (20, 10), 4)], name="Hole")
+        hole.addConstraint(Sketcher.Constraint("Radius", 0, 4))
+        hole.addConstraint(Sketcher.Constraint("DistanceX", -1, 1, 0, 3, 20))
+        feature(self.doc, features.Extrude, Profile=hole, Length=10, Operation="Cut")
+        e = edge_ref(self.doc, self.body, lambda e: isinstance(e.Curve, Part.Circle) and abs(e.Curve.Center.z - 10) < 1e-6)
+        ch = feature(self.doc, modify.Chamfer, Edges=[e], Distance=1)
+        hole.setDatum(0, App.Units.Quantity("5 mm"))
+        hole.setDatum(1, App.Units.Quantity("25 mm"))
+        self.recompute()
+        self.correct(ch, lambda: any(isinstance(f.Surface, Part.Cone) and abs(f.Surface.Apex.x - 25) < 1e-6
+                                     for f in self.body.Shape.Faces))
+
 
 if __name__ == "__main__":
     unittest.main()

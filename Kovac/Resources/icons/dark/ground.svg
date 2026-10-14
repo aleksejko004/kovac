@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+<polygon points="12.20,3.80 6.14,7.30 12.20,10.80 18.26,7.30" fill="#6E7884" stroke="#E8ECF0" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="6.14,12.30 12.20,15.80 12.20,10.80 6.14,7.30" fill="#4C5560" stroke="#E8ECF0" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="12.20,15.80 18.26,12.30 18.26,7.30 12.20,10.80" fill="#353C45" stroke="#E8ECF0" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="3.64,17.00 20.76,17.00" fill="none" stroke="#14857D" stroke-width="1.50" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="5.64,17.80 3.24,20.20" fill="none" stroke="#14857D" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="9.42,17.80 7.02,20.20" fill="none" stroke="#14857D" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="13.20,17.80 10.80,20.20" fill="none" stroke="#14857D" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="16.98,17.80 14.58,20.20" fill="none" stroke="#14857D" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="20.76,17.80 18.36,20.20" fill="none" stroke="#14857D" stroke-width="1.00" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

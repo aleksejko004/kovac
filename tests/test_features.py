@@ -68,6 +68,40 @@ class Features(unittest.TestCase):
         self.assertAlmostEqual(live_bodies(self.doc)[1].Shape.Volume, 25 * 10, 6)
         self.assertEqual(e2.ResolvedOperation, "New body")
 
+    def test_extrude_waits_for_a_pick_on_an_ambiguous_sketch(self):
+        """A sketch with one region extrudes with no picks (the common case stays one click);
+        with several, picking none is ambiguous and is reported, not silently merged."""
+        sk1 = sketch(self.doc, rect(0, 0, 10, 10), name="One")
+        self.ok(feature(self.doc, features.Extrude, Profile=sk1, Length=5))
+        self.vol(500, live_bodies(self.doc)[0])
+        sk2 = sketch(self.doc, rect(0, 0, 10, 10) + rect(20, 0, 30, 10), name="Two", constrain=False)
+        broken = feature(self.doc, features.Extrude, Profile=sk2, Length=5, Operation="New body")
+        self.assertIn("separate regions", broken.Status)
+        self.doc.removeObject(broken.Name)
+        from kovac import regions
+        rs = regions.of_sketch(sk2)
+        r = next(r for r in rs if r.point.x < 15)             # the first rectangle
+        picked = self.ok(feature(self.doc, features.Extrude, Profile=sk2, Length=5,
+                                 Regions=[r.key], RegionPoints=[r.point], Operation="New body"))
+        self.assertEqual(picked.ResolvedOperation, "New body")
+        self.assertAlmostEqual(live_bodies(self.doc)[1].Shape.Volume, 500, 4)
+
+    def test_region_picker_shows_nothing_chosen_when_ambiguous(self):
+        """The panel's own live region picker must agree with what _sketch_regions will
+        actually use, or clicking OK could silently extrude more than it shows as chosen."""
+        from types import SimpleNamespace
+        from kovac import regionpick, regions
+        sk1 = sketch(self.doc, rect(0, 0, 10, 10), name="RP1")
+        rs1 = regions.of_sketch(sk1)
+        rp1 = regionpick.RegionPicker.__new__(regionpick.RegionPicker)   # skip __init__: no Qt/navigation needed
+        rp1.ed = SimpleNamespace(fp=SimpleNamespace(Profile=sk1, Regions=[]))
+        self.assertEqual(rp1.chosen(rs1), {rs1[0].key})                 # one region: picking none is picking it
+        sk2 = sketch(self.doc, rect(0, 0, 10, 10) + rect(20, 0, 30, 10), name="RP2", constrain=False)
+        rs2 = regions.of_sketch(sk2)
+        rp2 = regionpick.RegionPicker.__new__(regionpick.RegionPicker)
+        rp2.ed = SimpleNamespace(fp=SimpleNamespace(Profile=sk2, Regions=[]))
+        self.assertEqual(rp2.chosen(rs2), set())                        # two regions: picking none picks nothing
+
     def test_revolve_sweep_loft(self):
         xy = sketch(self.doc, rect(10, 0, 20, 10), name="Ring")
         self.ok(feature(self.doc, features.Revolve, Profile=xy, Axis="Y", Angle=360))
@@ -124,7 +158,57 @@ class Features(unittest.TestCase):
             self.assertAlmostEqual(((g.StartPoint + g.EndPoint) * 0.5 - c.Center).Length, 10, 6)    # sides touch it
             self.assertAlmostEqual((g.StartPoint - c.Center).Length, 10 / math.cos(PI / 6), 6)
 
+    def test_midpoint_constraint(self):
+        import Sketcher
+        from kovac import sketchtools
+        sk = self.doc.addObject("Sketcher::SketchObject", "Mid")
+        li = sk.addGeometry(Part.LineSegment(V(0, 0, 0), V(10, 0, 0)), False)
+        pt = sk.addGeometry(Part.Point(V(3, 3, 0)), False)
+        sk.addConstraint(Sketcher.Constraint("DistanceX", li, 1, 0.0))
+        sk.addConstraint(Sketcher.Constraint("DistanceY", li, 1, 0.0))
+        c_x2 = sk.addConstraint(Sketcher.Constraint("DistanceX", li, 2, 10.0))
+        sk.addConstraint(Sketcher.Constraint("DistanceY", li, 2, 0.0))
+        self.doc.recompute()
+        sketchtools.add_midpoint(sk, pt, 1, li)
+        self.doc.recompute()
+        self.assertAlmostEqual(sk.Geometry[pt].X, 5.0, 6)
+        self.assertAlmostEqual(sk.Geometry[pt].Y, 0.0, 6)
+        sk.setDatum(c_x2, 16.0)                              # the line grows
+        self.doc.recompute()
+        self.assertAlmostEqual(sk.Geometry[pt].X, 8.0, 6)    # the point follows its new midpoint
+        self.assertAlmostEqual(sk.Geometry[pt].Y, 0.0, 6)
+
+    def test_snap_candidates_include_midpoints(self):
+        from kovac import grid
+        sk = self.doc.addObject("Sketcher::SketchObject", "SnapPts")
+        sk.addGeometry(Part.LineSegment(V(0, 0, 0), V(10, 0, 0)), False)
+        sk.addGeometry(Part.ArcOfCircle(Part.Circle(V(20, 0, 0), V(0, 0, 1), 5), 0, PI), False)
+        self.doc.recompute()
+        pts = grid._points(sk)
+        self.assertIn(V(5, 0, 0), pts)                                       # the line's own midpoint
+        arc = sk.Geometry[1]
+        self.assertIn((arc.StartPoint + arc.EndPoint) * 0.5, pts)            # the arc's chord midpoint
+        face = Part.Face(Part.Wire(Part.makePolygon([V(0, 0, 0), V(10, 0, 0), V(10, 10, 0), V(0, 10, 0), V(0, 0, 0)])))
+        self.assertIn(V(5, 0, 0), grid.face_points(face))                    # a straight edge's own midpoint
+
     # ---- modify
+    def test_fillet_arrow_points_into_an_outside_edge_and_out_of_an_inside_one(self):
+        from kovac import manip
+        pts = [(0, 0), (40, 0), (40, 10), (10, 10), (10, 30), (0, 30)]
+        sk = sketch(self.doc, [("line", pts[i], pts[(i + 1) % 6]) for i in range(6)])
+        feature(self.doc, features.Extrude, Profile=sk, Length=10)
+        self.body = live_bodies(self.doc)[0]
+        inside = self.ok(feature(self.doc, modify.Fillet, Edges=[edge_ref(self.doc, self.body, vertical_edge_at(10, 10))], Radius=2))
+        o, n = manip._edge_group_axis(inside)
+        self.assertGreater(n.x, 0.6)          # out into the empty inside corner, where the fillet adds material
+        self.assertGreater(n.y, 0.6)
+        inside.Suppressed = True
+        model.commit(self.doc)
+        outside = self.ok(feature(self.doc, modify.Fillet, Edges=[edge_ref(self.doc, self.body, vertical_edge_at(40, 0))], Radius=2))
+        o, n = manip._edge_group_axis(outside)
+        self.assertLess(n.x, -0.6)            # into the material at the outside corner, where it is cut away
+        self.assertGreater(n.y, 0.6)
+
     def test_fillet_and_chamfer(self):
         self.plate()
         e = edge_ref(self.doc, self.body, vertical_edge_at(40, 20))
@@ -204,7 +288,7 @@ class Features(unittest.TestCase):
         self.vol(8000 - 10 * 10 * 10, a)
         self.assertEqual(len(live_bodies(self.doc)), 1)
         miss = feature(self.doc, modify.SplitBody, Body=a.BodyId, Plane="YZ")   # x = 0 doesn't cross it
-        self.assertEqual(miss.Status, "The plane does not cross the body.")
+        self.assertEqual(miss.Status, "The split tool does not cross the body.")
         self.vol(7000, a)                                                       # state passed through
 
     def test_split_move_scale_mirror(self):
@@ -220,6 +304,70 @@ class Features(unittest.TestCase):
         self.assertAlmostEqual(live_bodies(self.doc)[0].Shape.Volume, 8 * 6000, 4)
         self.ok(feature(self.doc, modify.Mirror, Bodies=[ids[1]], Plane="YZ", Join=False))
         self.assertEqual(len(live_bodies(self.doc)), 4)
+
+    def test_split_and_sketch_on_a_three_point_plane(self):
+        self.plate()
+        def corner(x, y, z):
+            k = next(i for i, v in enumerate(self.body.Shape.Vertexes, 1) if (v.Point - V(x, y, z)).Length < 1e-6)
+            return model.pick_ref(self.body, "Vertex%d" % k)
+        d = self.ok(feature(self.doc, datum.DatumPlane, Mode="ThreePoints",
+                            Refs=[corner(0, 0, 0), corner(40, 20, 0), corner(0, 0, 10)]))
+        self.ok(feature(self.doc, modify.SplitBody, Body=self.body.BodyId, Plane=d.Name))
+        vols = sorted(round(b.Shape.Volume) for b in live_bodies(self.doc))
+        self.assertEqual(vols, [4000, 4000])                  # the plate's diagonal, top to bottom
+        sk_plane = self.ok(feature(self.doc, datum.DatumPlane, Mode="Offset", Base=d.Name, Auto=True))
+        self.assertAlmostEqual(abs(sk_plane.Placement.Rotation.multVec(V(0, 0, 1)).dot(V(1, -2, 0).normalize())), 1, 6)
+
+    def test_split_by_a_curved_face(self):
+        """A cylindrical or spherical face splits by the whole analytic surface, not just the
+        clicked patch; a cone or freeform face still needs a flat face or a plane -- a clear
+        error, not a crash."""
+        self.plate()                                  # 40 x 20 x 10, x:[0,40] y:[0,20] z:[0,10]
+        cyl = feature(self.doc, features.Primitive, PrimitiveType="Cylinder", Radius=5, Height=30,
+                      Location=App.Placement(V(20, 10, -10), App.Rotation()), Operation="New body")
+        cyl_body = next(b for b in live_bodies(self.doc) if b.BodyId != self.body.BodyId)
+        ref = face_ref(self.doc, cyl_body, lambda f: isinstance(f.Surface, Part.Cylinder))
+        self.ok(feature(self.doc, modify.SplitBody, Body=self.body.BodyId, Plane=ref))
+        main_vols = sorted(b.Shape.Volume for b in live_bodies(self.doc) if b.BodyId != cyl_body.BodyId)
+        self.assertEqual(len(main_vols), 2)
+        inner = PI * 5 ** 2 * 10
+        self.assertAlmostEqual(main_vols[0], inner, 1)
+        self.assertAlmostEqual(main_vols[1], 8000 - inner, 1)
+
+        before_ids = {b.BodyId for b in live_bodies(self.doc)}
+        feature(self.doc, features.Primitive, PrimitiveType="Cone", Radius=8, Radius2=2, Height=20,
+                Location=App.Placement(V(20, 10, -5), App.Rotation()), Operation="New body")
+        cone_body = next(b for b in live_bodies(self.doc) if b.BodyId not in before_ids)
+        cone_ref = face_ref(self.doc, cone_body, lambda f: isinstance(f.Surface, Part.Cone))
+        bad = feature(self.doc, modify.SplitBody, Body=self.body.BodyId, Plane=cone_ref)
+        self.assertIn("flat face, or a cylindrical or spherical face", bad.Status)
+
+    def test_pattern_along_a_path(self):
+        """Pattern Type='Path': evenly spaced along a sketch curve or picked 3D edges (not just
+        a flat sketch), instances rotated to follow the tangent when Align is set."""
+        self.plate()                                  # 40 x 20 x 10
+        hole_vol = PI * 2.75 ** 2 * 10                 # a through M5 in a 10 mm plate (see test_patterns)
+        h = feature(self.doc, features.Hole, Face=self.top(), Positions=[V(5, 10, 10)], Size="M5", ThroughAll=True)
+        path = sketch(self.doc, [("line", (5, 10), (35, 10))], name="HolePath")   # starts at the hole itself
+        self.ok(feature(self.doc, modify.Pattern, Sources=[h], Type="Path", Path=path, Count=4))
+        self.vol(8000 - 4 * hole_vol)                  # 4 evenly spaced holes, 10 mm apart: x = 5, 15, 25, 35
+        state = model.state_of(model.tip(self.doc))
+        centers = sorted(round(f.CenterOfMass.x, 3) for b in state.values() for f in b.shape.Faces
+                         if isinstance(f.Surface, Part.Cylinder) and abs(f.Surface.Radius - 2.75) < 1e-3)
+        self.assertEqual(centers, [5.0, 15.0, 25.0, 35.0])
+
+        # a 3D path from picked edges, not a sketch: a small reference body's own vertical edge
+        before_ids = {b.BodyId for b in live_bodies(self.doc)}
+        feature(self.doc, features.Primitive, PrimitiveType="Box", Length=2, Width=2, Height=12,
+                Location=App.Placement(V(60, 0, 0), App.Rotation()), Operation="New body")
+        ref_body = next(b for b in live_bodies(self.doc) if b.BodyId not in before_ids)
+        ref = edge_ref(self.doc, ref_body, vertical_edge_at(60, 0))
+        before2 = len(live_bodies(self.doc))
+        self.ok(feature(self.doc, modify.Pattern, Bodies=[ref_body.BodyId], Type="Path", PathEdges=[ref], Count=3))
+        self.assertEqual(len(live_bodies(self.doc)), before2 + 2)      # the original + 2 new copies
+        new_boxes = [b for b in live_bodies(self.doc) if b.BodyId != ref_body.BodyId and b.BodyId not in before_ids]
+        z = sorted(round(b.Shape.BoundBox.Center.z, 3) for b in new_boxes)
+        self.assertEqual(z, [12.0, 18.0])          # original centre z=6, offset by the edge's own 0/6/12 steps
 
     def test_patterns(self):
         self.plate()

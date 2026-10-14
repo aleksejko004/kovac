@@ -10,7 +10,7 @@ import Part
 from kovac import model, topo
 
 V = App.Vector
-PLANE_MODES = ["XY", "XZ", "YZ", "Offset", "Angle", "Midplane", "ThreePoints", "Tangent", "AlongPath"]
+PLANE_MODES = ["XY", "XZ", "YZ", "Offset", "Angle", "Midplane", "ThreePoints", "Tangent", "AlongPath", "Free"]
 AXIS_MODES = ["X", "Y", "Z", "TwoPoints", "Edge", "Cylinder"]
 POINT_MODES = ["Coordinates", "Vertex", "EdgeMiddle", "FaceCenter"]
 
@@ -60,10 +60,15 @@ class DatumPlane(_Datum):
         fp.addProperty("App::PropertyFloatConstraint", "Position", "Plane", "along the path, 0..1").Position = (0.0, 0.0, 1.0, 0.05)
         fp.addProperty("App::PropertyLength", "Size", "Plane", "display size").Size = 60
         fp.addProperty("App::PropertyBool", "Auto", "Plane", "created for a sketch (hidden in the tree)", 4)
+        fp.addProperty("App::PropertyPlacement", "FreePlacement", "Plane", "where Move dropped it (Free mode)")
 
     def apply(self, fp, state):
         m = fp.Mode
         refs = model.refs(fp, "Refs")
+        if m == "Free":
+            s = fp.Size.Value
+            self.show(fp, Part.makePlane(s, s, V(-s / 2, -s / 2, 0)), fp.FreePlacement)
+            return state
         if m in ("XY", "XZ", "YZ"):
             o, n = _plane_of_ref(fp.Document, m, state)
         elif m == "Offset":

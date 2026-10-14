@@ -131,6 +131,11 @@ def face_point(shape, normal):
     raise RuntimeError("no face with normal %s" % normal)
 
 
+def ok_button():
+    from kovac import editor
+    return [b for b in editor.current().findChildren(QtWidgets.QPushButton) if b.text() == "OK"][0]
+
+
 # ------------------------------------------------------------------ scenario
 def scenario():
     from kovac import commands, measure, navigation, radial, search, shell, views
@@ -205,6 +210,14 @@ def scenario():
     click(to_qt(V(front_c.x - 15, front_c.y, front_c.z)), QtCore.Qt.ShiftModifier)
     yield 100
     check("Shift+click adds the front face", len(picks()) == 2, picks())
+    check("selecting a face shades the whole body, not just the clicked face",
+          navigation._sel_highlight.node is not None)
+    Gui.Selection.clearSelection()
+    yield 100
+    check("clearing the selection removes the whole-body shading", navigation._sel_highlight.node is None)
+    click(to_qt(V(top_c.x - 15, top_c.y, top_c.z)))
+    click(to_qt(V(front_c.x - 15, front_c.y, front_c.z)), QtCore.Qt.ShiftModifier)
+    yield 100
     tl = shell._ui["timeline"].widget()
     check("timeline highlights the creating feature", tl.list.currentRow() >= 0, tl.list.currentRow())
     commands.run("Kovac_Measure")
@@ -272,6 +285,35 @@ def scenario():
     check("reset Front restores labels", cube.GetString("TextFront") == "FRONT")
     views.go(view(), views.view_rotation(views.ISO), fit=True)
     yield 500
+
+    # -- ground grid: the far clip plane always reaches the grid, at any tilt (regression) --
+    # Coin's own auto-clipping sizes the far plane from the scene bounding box, and the grid
+    # is deliberately excluded from that box (so 'fit all' never zooms out to show it) -- which
+    # used to starve the clip planes too, cutting the grid off at the model's edge. Where that
+    # cut lands on screen moves with the camera, so it read as "the grid disappears at some
+    # angles". Sweep several tilts and check the far plane still reaches every grid corner.
+    from kovac import grid
+    rot0 = view().getCameraOrientation()
+    vd0 = V(*view().getViewDirection())
+    local_fwd = rot0.inverted().multVec(vd0)
+    short_clip = []
+    for elev in (2, 6, 12, 25, 40):      # degrees above the horizon
+        target = V(1, -1, math.sin(math.radians(elev))).normalize()
+        view().setCameraOrientation(App.Rotation(local_fwd, target))
+        grid.refresh(force=True)
+        s = grid._state["step"]
+        cx, cy = grid._state["centre"]
+        reach = max(it.vp.width(), it.vp.height()) * it.px_size()
+        half = min(math.ceil(max(s * 30, reach * 1.6) / (5 * s)) * 5 * s, s * 400)
+        pos = V(*view().getCameraNode().position.getValue().getValue())
+        fwd = V(*view().getViewDirection()).normalize()    # the far plane bounds *depth*, not straight-line distance
+        corner_depth = max((V(cx + sx * half, cy + sy * half, 0) - pos).dot(fwd) for sx in (-1, 1) for sy in (-1, 1))
+        far = view().getCameraNode().farDistance.getValue()
+        if far < corner_depth - 1e-6:
+            short_clip.append((elev, round(far, 1), round(corner_depth, 1)))
+    check("ground grid is never clipped away by the camera's far plane, at any tilt", not short_clip, short_clip)
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 400
 
     # -- window / crossing / tangent / pick list ------------------------------------------
     bb = body.Shape.BoundBox
@@ -342,6 +384,41 @@ def scenario():
     w.close()
     check("command search key is S", Gui.Command.get("Kovac_Search").getInfo()["shortcut"] == "S")
 
+    # -- shortcuts: assigned where reasonable, and shown on hover (regression) ------------
+    want_keys = {"Kovac_Sketch": "F2", "Kovac_Extrude": "X", "Kovac_Revolve": "R", "Kovac_Sweep": "U",
+                 "Kovac_Loft": "O", "Kovac_Hole": "B", "Kovac_Thread": "Y", "Kovac_Fillet": "F",
+                 "Kovac_Chamfer": "M", "Kovac_Shell": "J", "Kovac_FinishSketch": "Return", "Kovac_Grid": "F3"}
+    missing = {cid: Gui.Command.get(cid).getInfo().get("shortcut") for cid in want_keys
+               if Gui.Command.get(cid).getInfo().get("shortcut") != want_keys[cid]}
+    check("the commands shown most often in the ribbon carry a shortcut", not missing, missing)
+    act = Gui.Command.get("Kovac_Fillet").getAction()[0]
+    check("hovering a command with a shortcut shows it in the tooltip", "(F)" in act.toolTip(), act.toolTip())
+    # no two Kovač commands claim the same key, and none is a prefix of another (e.g. a bare
+    # "G" shortcut would be ambiguous against a "G, R"-style sequence elsewhere)
+    kovac_keys = {cid: Gui.Command.get(cid).getInfo().get("shortcut", "") for cid in Gui.listCommands()
+                  if cid.startswith("Kovac_")}
+    kovac_keys = {cid: sc for cid, sc in kovac_keys.items() if sc}
+    seqs = {cid: tuple(p.strip() for p in sc.split(",")) for cid, sc in kovac_keys.items()}
+    clashes = []
+    for cid1, s1 in seqs.items():
+        for cid2, s2 in seqs.items():
+            if cid1 < cid2 and (s1 == s2 or s1[:min(len(s1), len(s2))] == s2[:min(len(s1), len(s2))]):
+                clashes.append((cid1, kovac_keys[cid1], cid2, kovac_keys[cid2]))
+    check("no two Kovač shortcuts collide or prefix one another", not clashes, clashes)
+
+    # -- numeric fields take '.' or ',' as the decimal point regardless of locale ---------
+    from kovac import editor
+    sb = editor.DoubleSpinBox()
+    sb.setDecimals(4)
+    sb.setRange(-1e6, 1e6)
+    got = {}
+    for t in ("3.5", "3,5", "-12,75"):
+        sb.lineEdit().setText(t)
+        sb.interpretText()
+        got[t] = sb.value()
+    check("a value field takes either decimal point, under this locale (%s)" % sb.locale().name(),
+          got == {"3.5": 3.5, "3,5": 3.5, "-12,75": -12.75}, (sb.locale().decimalPoint(), got))
+
     # -- regeneration + undo --------------------------------------------------------------
     box = doc.addObject("Part::Box", "Loose")   # outside our command layer, no recompute call
     box.Length = 7
@@ -357,6 +434,67 @@ def scenario():
     check("STEP import is one undo step", len([o for o in doc.Objects if hasattr(o, "Shape")]) == 0, [o.Name for o in doc.Objects])
     doc.redo()
     yield 200
+
+    # -- OK on a brand-new, already-broken feature discards it; on a broken *edit* keeps it --
+    import Part
+    from kovac import features
+    sk2 = doc.addObject("Sketcher::SketchObject", "FailSketch")
+    pts = [V(0, 0, 0), V(10, 0, 0), V(10, 10, 0), V(0, 10, 0)]
+    for i in range(4):
+        sk2.addGeometry(Part.LineSegment(pts[i], pts[(i + 1) % 4]))
+    doc.recompute()
+    before_new = set(doc.Objects)
+    ed_new = editor.start(features.Extrude, Profile=sk2, Length=0, Operation="New body")  # zero distance: fails outright
+    yield 150
+    status_new = ed_new.fp.Status
+    ok_button().click()
+    yield 200
+    check("a brand-new feature that fails outright is discarded on OK, not left broken",
+          bool(status_new) and set(doc.Objects) == before_new | {sk2}, (status_new, [o.Name for o in doc.Objects]))
+    ed_good = editor.start(features.Extrude, Profile=sk2, Length=5, Operation="New body")  # its own body: never touches the imported one
+    yield 150
+    ok_button().click()
+    yield 200
+    ex2 = doc.getObject(ed_good.fp.Name)
+    ed_edit = editor.edit(ex2)
+    yield 150
+    ed_edit.set("Length", 0)                                          # breaks it by editing, not creating
+    yield 150
+    status_edit = ed_edit.fp.Status
+    ok_button().click()
+    yield 200
+    check("a feature broken by editing it stays in the history, with its status set",
+          bool(status_edit) and doc.getObject(ex2.Name) is not None and doc.getObject(ex2.Name).Status == status_edit,
+          (status_edit, doc.getObject(ex2.Name)))
+    model.remove(doc, ex2)        # proper history removal (relink/sync_bodies), not a raw removeObject
+    doc.removeObject(sk2.Name)
+    doc.recompute()
+    yield 200
+
+    # -- dragging a material out of its panel onto a body assigns it -----------------------
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 300
+    commands.run("Kovac_Material")
+    yield 200
+    mat_panel = mw.findChild(QtWidgets.QDockWidget, "kovacMaterial")
+    mat_list = mat_panel.widget().findChild(QtWidgets.QListWidget) if mat_panel else None
+    key = mat_list.item(0).data(QtCore.Qt.UserRole) if mat_list else None
+    if mat_panel:
+        mat_panel.close()           # the floating panel can sit over the viewport and block picking there
+    yield 500
+    view().fitAll()
+    yield 300
+    drop_i, drop_c = face_point(body.Shape, V(0, 0, 1))      # recomputed fresh, not reused from way earlier
+    before_material = body.Material
+    mime = QtCore.QMimeData()
+    mime.setData("application/x-kovac-material", key.encode("utf-8") if key else b"")
+    drop_pos = to_qt(V(drop_c.x - 15, drop_c.y, drop_c.z))
+    drop_ev = QtGui.QDropEvent(QtCore.QPointF(drop_pos), QtCore.Qt.CopyAction, mime, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier)
+    handled = it.drop_material(drop_ev) if key else False
+    yield 100
+    check("dragging a material from its panel onto a body assigns it",
+          key is not None and handled and body.Material == key and before_material != key,
+          (key, handled, before_material, body.Material))
 
     # -- modes keep the model ------------------------------------------------------------
     commands.run("Kovac_Mode_Make")

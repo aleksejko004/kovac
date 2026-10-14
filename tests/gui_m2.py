@@ -18,6 +18,7 @@ import FreeCAD as App
 import FreeCADGui as Gui
 import Part
 from PySide import QtCore, QtGui, QtWidgets
+from PySide6 import QtTest     # FreeCAD's PySide shim has no QtTest; real key clicks go through the shortcut map
 
 V = App.Vector
 OUT = os.environ["KOVAC_RESULT"]
@@ -55,6 +56,13 @@ def view():
 
 def vp():
     return view().graphicsView().viewport()
+
+
+def click_widget(w, pos, mods=QtCore.Qt.NoModifier):
+    """A left click delivered to a widget the way Qt hands it one (press, release)."""
+    for t, held in ((QtCore.QEvent.MouseButtonPress, QtCore.Qt.LeftButton), (QtCore.QEvent.MouseButtonRelease, QtCore.Qt.NoButton)):
+        QtWidgets.QApplication.sendEvent(w, QtGui.QMouseEvent(t, QtCore.QPointF(pos), QtCore.QPointF(w.mapToGlobal(pos)),
+                                                              QtCore.Qt.LeftButton, held, mods))
 
 
 def to_qt(p):
@@ -192,8 +200,8 @@ def end_task(name):
 
 
 # ------------------------------------------------------------------ scenario
-def scenario():
-    from kovac import commands, editor, model, navigation, params, sketchmode, views
+def setup():
+    from kovac import commands, navigation, views
     mw = Gui.getMainWindow()
     mw.showMaximized()
     if mw.screen().availableGeometry().width() < 1700:     # CI screens: the ribbon is laid out for 1700 px
@@ -207,6 +215,11 @@ def scenario():
     views.go(view(), views.view_rotation(views.ISO))
     yield 400
 
+
+def seg_bracket():
+    """The L-bracket through the UI, panels, parameters, timeline, browser, sketch tools."""
+    from kovac import commands, curve3d, editor, features, model, move, navigation, params, sketchmode, views  # noqa: F401
+    mw = Gui.getMainWindow()  # noqa: F841
     # -- layout: big mode button, group names under their buttons, no stock navigation picker
     mb = mw.findChild(QtWidgets.QToolButton, "kovacModeButton")
     check("the big mode button shows the mode", mb is not None and mb.isVisible() and mb.text() == "DESIGN", mb and mb.text())
@@ -246,13 +259,28 @@ def scenario():
     bar = mw.findChild(QtWidgets.QToolBar, "kovacSketchBar")
     acts = {a.objectName(): a for a in bar.findChildren(QtGui.QAction) if a.objectName().startswith(("Sketcher_", "Kovac_"))}
     want = {"Sketcher_CreateLine", "Sketcher_CreateRectangle", "Sketcher_CreateCircle", "Sketcher_Dimension",
-            "Sketcher_ConstrainCoincident", "Sketcher_ConstrainHorizontal", "Sketcher_ConstrainTangent", "Sketcher_Trimming"}
+            "Sketcher_ConstrainCoincident", "Sketcher_ConstrainHorizontal", "Sketcher_ConstrainTangent",
+            "Sketcher_Trimming", "Kovac_ConstrainMidpoint"}
     ribbon_buttons = [b for b in bar.findChildren(QtWidgets.QToolButton) if b.defaultAction() in acts.values()]
     hidden = [b.defaultAction().objectName() for b in ribbon_buttons if not b.isVisible()]
-    check("the sketch ribbon shows every tool (51, variants behind arrows), none cut off",
-          want <= set(acts) and len(acts) >= 51 and len(ribbon_buttons) >= 30 and not hidden,
+    check("the sketch ribbon shows every tool (52, variants behind arrows), none cut off",
+          want <= set(acts) and len(acts) >= 52 and len(ribbon_buttons) >= 30 and not hidden,
           ("window %d px, screen %d px" % (mw.width(), mw.screen().availableGeometry().width()),
            len(acts), len(ribbon_buttons), hidden, sorted(want - set(acts))))
+    # sketches stay in Kovač, so FreeCAD never built the sketcher's own actions and never
+    # registered its default keys: every tooltip came out without one, and the keys did nothing
+    no_key = sorted({a.objectName() for a in acts.values()
+                     if "(" not in a.toolTip().split("\n")[0] and a.objectName() not in ("Sketcher_ConstrainSymmetric",)})
+    check("every sketch tool's tooltip names its shortcut", not no_key, no_key)
+    fired = []
+    line_act = acts["Sketcher_CreateLine"]
+    line_act.triggered.connect(lambda *_: fired.append(1))
+    vp().setFocus()
+    QtTest.QTest.keyClick(vp(), QtCore.Qt.Key_G)
+    QtTest.QTest.keyClick(vp(), QtCore.Qt.Key_L)
+    yield 300
+    check("typing a sketch tool's shortcut (G, L) starts it", bool(fired))
+    QtTest.QTest.keyClick(vp(), QtCore.Qt.Key_Escape)
     yield 400                                 # the task panel watcher runs every 300 ms
     tasks = mw.findChild(QtWidgets.QDockWidget, "Tasks")
     check("the sketcher's task panel stays closed", tasks is None or not tasks.isVisible())
@@ -409,6 +437,28 @@ def scenario():
     for _ in range(len(sk.Geometry) - n0):
         sk.delGeometry(n0)
     sk.recompute()
+    # Midpoint constraint: select a point and a line on the ribbon, it snaps to the midpoint
+    import Sketcher
+    n4 = len(sk.Geometry)
+    li4 = sk.addGeometry(Part.LineSegment(V(2 * g, 2 * g, 0), V(8 * g, 2 * g, 0)), False)
+    pt4 = sk.addGeometry(Part.Point(V(4 * g, 5 * g, 0)), False)
+    sk.addConstraint(Sketcher.Constraint("DistanceX", li4, 1, 2 * g))
+    sk.addConstraint(Sketcher.Constraint("DistanceY", li4, 1, 2 * g))
+    sk.addConstraint(Sketcher.Constraint("DistanceX", li4, 2, 8 * g))
+    sk.addConstraint(Sketcher.Constraint("DistanceY", li4, 2, 2 * g))
+    sk.recompute()
+    vidx = next(i for i in range(1, 4 * len(sk.Geometry) + 2) if sk.getGeoVertexIndex(i) == (pt4, 1))
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(App.ActiveDocument.Name, sk.Name, "Edge%d" % (li4 + 1))
+    Gui.Selection.addSelection(App.ActiveDocument.Name, sk.Name, "Vertex%d" % vidx)
+    acts["Kovac_ConstrainMidpoint"].trigger()
+    yield 200
+    check("Midpoint constraint: a point picked with a line snaps to its midpoint",
+          abs(sk.Geometry[pt4].X - 5 * g) < 1e-6 and abs(sk.Geometry[pt4].Y - 2 * g) < 1e-6,
+          (sk.Geometry[pt4].X, sk.Geometry[pt4].Y))
+    for _ in range(len(sk.Geometry) - n4):
+        sk.delGeometry(n4)
+    sk.recompute()
     cam.height.setValue(saved[0])
     cam.position.setValue(*saved[1])
     grid.refresh(force=True)
@@ -466,15 +516,26 @@ def scenario():
     o, n = arrow.axis
     a0 = to_qt(o + n * 5)
     mouse(QtCore.QEvent.MouseButtonPress, a0, QtCore.Qt.LeftButton, QtCore.Qt.LeftButton)
+    follows = []
     for k in range(1, 6):
         mouse(QtCore.QEvent.MouseMove, a0 - QtCore.QPoint(0, 12 * k), QtCore.Qt.NoButton, QtCore.Qt.LeftButton)
+        follows.append(arrow.seg is not None and abs((arrow.seg[0] - o).dot(n) - ed.fp.Length.Value) < 1e-6)
         yield 40
     mouse(QtCore.QEvent.MouseButtonRelease, a0 - QtCore.QPoint(0, 60), QtCore.Qt.LeftButton, QtCore.Qt.NoButton)
     yield 200
     dragged = ed.fp.Length.Value
     check("dragging the arrow changes the distance", dragged > 6, dragged)
+    check("the arrow follows each mouse move at once, not after the preview", all(follows), follows)
     ed.set("Length", 5)
     yield 300
+    from kovac import manip
+    a, b = arrow.seg
+    on_face = min((a - (o + n * 5)).Length, (b - (o + n * 5)).Length) < 1e-6
+    check("the extrude arrow keeps one size on screen and starts on the extruded face",
+          on_face and abs((b - a).Length / arrow.px - manip.ARROW_PX) < 1, (a, b, arrow.px))
+    mid = to_qt((a + b) * 0.5)
+    check("the arrow is grabbed along its whole length, not only at its tip",
+          arrow._screen_distance(navigation.install(), mid) < 2)
     # panels never block the view or the tree
     c = QtCore.QPoint(vp().width() // 2, vp().height() // 2)
     import pivy.coin  # noqa: F401
@@ -571,6 +632,22 @@ def scenario():
     check("clicking the bend picks an edge", picked and picked[0].split(".")[-1].startswith("Edge"), picked)
     command("Kovac_Fillet")
     yield 300
+    # the panel has its own drag arrow for the radius, at the picked edge, same as Extrude's
+    from kovac import navigation
+    fillet_ed = editor.current()
+    arrow = next((h for h in navigation.hooks if type(h).__name__ == "Arrow"), None)
+    check("fillet panel has a drag arrow for its radius", arrow is not None and arrow.axis is not None,
+          arrow and arrow.axis)
+    if arrow is not None and arrow.axis is not None:
+        o, n = arrow.axis
+        a0 = to_qt(o + n * arrow.value())
+        mouse(QtCore.QEvent.MouseButtonPress, a0, QtCore.Qt.LeftButton, QtCore.Qt.LeftButton)
+        for k in range(1, 4):
+            mouse(QtCore.QEvent.MouseMove, to_qt(o + n * (arrow.value() + k)), QtCore.Qt.NoButton, QtCore.Qt.LeftButton)
+            yield 40
+        mouse(QtCore.QEvent.MouseButtonRelease, to_qt(o + n * (arrow.value() + 3)), QtCore.Qt.LeftButton, QtCore.Qt.NoButton)
+        yield 150
+        check("dragging the fillet arrow changes its radius", fillet_ed.fp.Radius.Value > 1, fillet_ed.fp.Radius.Value)
     type_into(editor_field("Radius"), "3 mm")
     yield 300
     press(ok_button())
@@ -685,6 +762,594 @@ def scenario():
     yield 300
     check("Delete removes a selected body; undo brings it back", gone and len(bodies()) == 1, (gone, len(bodies())))
     shot("05_benchmark_part")
+
+    # Opening a second feature panel while a first one is still open (unclosed, not OK'd or
+    # Cancelled) used to crash: the new panel's Cancel could abort the transaction the first
+    # panel's own feature was just created under, deleting it out from under its own open
+    # panel (editor.py's close_current(), run before, not after, the new one starts).
+    from kovac import editor
+
+    def side_rect(name, x0):
+        s = App.ActiveDocument.addObject("Sketcher::SketchObject", name)
+        s.Placement = App.Placement(V(x0, -60, 0), App.Rotation())
+        pts = [V(0, 0, 0), V(10, 0, 0), V(10, 10, 0), V(0, 10, 0)]
+        for i in range(4):
+            s.addGeometry(Part.LineSegment(pts[i], pts[(i + 1) % 4]))
+        return s
+    rs1 = side_rect("CancelA", 0)
+    rs2 = side_rect("CancelB", 30)
+    App.ActiveDocument.recompute()
+    before_doc = set(App.ActiveDocument.Objects)         # the two sketches stay; only the panels' own objects must not
+    ed1 = editor.start(features.Extrude, Profile=rs1, Length=5)
+    yield 150
+    ed2 = editor.start(features.Extrude, Profile=rs2, Length=7, Operation="New body")    # no crash opening this
+    yield 150
+    is_current = editor.current() is ed2
+    try:                                        # fp1's name may already be reused by fp2; identity is what matters
+        ed1.fp.Name
+        fp1_gone = False
+    except Exception:
+        fp1_gone = True
+    cancel_btn = next(b for b in ed2.findChildren(QtWidgets.QPushButton) if b.text() == "Cancel")
+    press(cancel_btn)
+    yield 300
+    left_over = set(App.ActiveDocument.Objects) - before_doc
+    check("a second panel opened over an unclosed first one doesn't crash, and Cancel leaves nothing behind",
+          is_current and fp1_gone and not left_over,
+          (is_current, fp1_gone, sorted(o.Name for o in left_over)))
+
+    # -- group-selecting multiple history items: Delete key, and grouping reads as one thing --
+    tree = shell._ui["tree"].widget()
+    tl = shell._ui["timeline"].widget()
+    before_bodies = len(bodies())
+    for i, x0 in enumerate((60, 80, 100)):
+        s = side_rect("Del%d" % i, x0)
+        App.ActiveDocument.recompute()
+        ed = editor.start(features.Extrude, Profile=s, Length=5, Operation="New body")
+        yield 100
+        ed.accept()
+        yield 150
+    check("three bodies added for the group-select tests", len(bodies()) == before_bodies + 3, len(bodies()))
+
+    # browser: multi-select two bodies, Delete key removes both as one undo step
+    # -- picked with real clicks (Ctrl for the second): setSelected() alone once hid that no row
+    # could be selected by mouse at all
+    tree.clearSelection()
+    body_items = [it for it in tree.walk() if tree.obj(it) is not None and hasattr(tree.obj(it), "BodyId")]
+    for k, it in enumerate(body_items[-2:]):
+        tree.scrollToItem(it)
+        r = tree.visualItemRect(it)
+        click_widget(tree.viewport(), QtCore.QPoint(r.left() + 30, r.center().y()),
+                     QtCore.Qt.ControlModifier if k else QtCore.Qt.NoModifier)
+        yield 80
+    picked = {s.Object.Name for s in Gui.Selection.getSelectionEx("*", 0)}
+    check("browser: click then Ctrl+click selects both bodies, here and in the 3D view",
+          len(tree.selectedItems()) == 2 and picked == {tree.obj(it).Name for it in body_items[-2:]},
+          ([x.text(0) for x in tree.selectedItems()], sorted(picked)))
+    QtWidgets.QApplication.sendEvent(tree, QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Delete, QtCore.Qt.NoModifier))
+    yield 200
+    after_browser_delete = len(bodies())
+    App.ActiveDocument.undo()
+    yield 200
+    check("browser: Delete key removes every selected body, one undo step",
+          after_browser_delete == before_bodies + 1 and len(bodies()) == before_bodies + 3,
+          (before_bodies, after_browser_delete, len(bodies())))
+
+    # timeline: multi-select two features, Delete key removes both as one undo step
+    tl.rebuild()
+    yield 100
+    feat_items = [it for it in [tl.list.item(i) for i in range(tl.list.count())] if not it.data(QtCore.Qt.UserRole + 1)]
+    before_feats = len(feat_items)
+    for it in feat_items[-2:]:
+        it.setSelected(True)
+    yield 100
+    QtWidgets.QApplication.sendEvent(tl.list, QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Delete, QtCore.Qt.NoModifier))
+    yield 200
+    tl.rebuild()
+    after_feats = len([it for it in [tl.list.item(i) for i in range(tl.list.count())] if not it.data(QtCore.Qt.UserRole + 1)])
+    App.ActiveDocument.undo()
+    tl.rebuild()
+    yield 200
+    check("timeline: Delete key removes every selected feature, one undo step",
+          after_feats == before_feats - 2, (before_feats, after_feats))
+
+    # grouping: picked with real Ctrl+clicks, the group shows as one item -- not one labelled
+    # item per member, which read as "each feature is its own group"
+    GROUP = QtCore.Qt.UserRole + 2
+    feat_items = [it for it in [tl.list.item(i) for i in range(tl.list.count())] if not it.data(QtCore.Qt.UserRole + 1)]
+    tl.list.clearSelection()
+    for k, it in enumerate(feat_items[-2:]):
+        click_widget(tl.list.viewport(), tl.list.visualItemRect(it).center(),
+                     QtCore.Qt.ControlModifier if k else QtCore.Qt.NoModifier)
+        yield 120
+    picked = [tl.obj(it) for it in tl.list.selectedItems()]
+    check("timeline: Ctrl+click picks several features", len(picked) == 2, [o.Label for o in picked if o])
+    tl.group(picked, "SideBodies")
+    yield 150
+    rows = [tl.list.item(i) for i in range(tl.list.count())]
+    heads = [it for it in rows if it.data(GROUP) == "SideBodies"]
+    check("a new group shows as one item standing for all its members",
+          len(heads) == 1 and "(2)" in heads[0].text() and len(rows) == len(feat_items) - 2 + 1 + 1,   # + the rollback marker
+          ([it.text() for it in rows], len(feat_items)))
+    tl.double(heads[0])
+    yield 150
+    rows = [tl.list.item(i) for i in range(tl.list.count())]
+    heads = [k for k, it in enumerate(rows) if it.data(GROUP) == "SideBodies"]
+    members = [it for it in rows if tl.obj(it) in picked and not it.data(GROUP)]
+    tints = {it.background().color().name() for it in members + [rows[heads[0]]]} if heads else set()
+    check("opened, the group is one header in front of its members, sharing its tint",
+          len(heads) == 1 and len(members) == 2 and len(tints) == 1 and all(not it.text() for it in members),
+          ([it.text() for it in rows], tints))
+    App.ActiveDocument.undo()
+    yield 150
+    yield 100
+
+
+def seg_curve3d():
+    """A sketch's free B-spline becomes a 3D curve; its points drag in 3D."""
+    from kovac import commands, curve3d, editor, features, model, move, navigation, params, sketchmode, views  # noqa: F401
+    mw = Gui.getMainWindow()  # noqa: F841
+    # -- 3D curve: a sketch's free B-spline leaves the sketch; its points then drag in 3D --
+    App.newDocument("Curve3DTest")
+    yield 300
+    from kovac import curve3d
+    sk3 = sketchmode.create("XY")
+    i = sk3.addGeometry(Part.BSplineCurve([V(0, 0, 0), V(10, 15, 0), V(25, -10, 0), V(40, 5, 0)], None, None, False, 3, None, False))
+    sk3.exposeInternalGeometry(i)
+    App.ActiveDocument.recompute()
+    yield 500
+    command("Kovac_Curve3D")
+    yield 300
+    ed3 = curve3d.current()
+    check("3D curve: the sketch's free B-spline becomes a 3D curve, open for editing",
+          ed3 is not None and not sketchmode.in_sketch() and not sk3.Geometry,
+          (ed3, sketchmode.in_sketch(), len(sk3.Geometry)))
+    views.go(view(), views.view_rotation((0, -1, 0)), fit=True)      # from the front: dragging up lifts the point
+    yield 800
+    p1 = V(ed3.obj.Points[1])
+    it3 = navigation.install()                  # the new document's own view
+    x, y = it3.qt(view().getPointOnViewport(p1))
+    start = QtCore.QPoint(int(x), int(y))
+    L = QtCore.Qt.LeftButton
+    for t, q, held in [(QtCore.QEvent.MouseButtonPress, start, L)] + \
+            [(QtCore.QEvent.MouseMove, start - QtCore.QPoint(0, 8 * k), L) for k in range(1, 11)] + \
+            [(QtCore.QEvent.MouseButtonRelease, start - QtCore.QPoint(0, 80), QtCore.Qt.NoButton)]:
+        QtWidgets.QApplication.sendEvent(vp(), QtGui.QMouseEvent(t, QtCore.QPointF(q), QtCore.QPointF(vp().mapToGlobal(q)),
+                                                                 QtCore.Qt.LeftButton if t != QtCore.QEvent.MouseMove else QtCore.Qt.NoButton,
+                                                                 held, QtCore.Qt.NoModifier))
+    yield 200
+    p1b = V(ed3.obj.Points[1])
+    check("3D curve: dragging a point in a side view lifts it out of the sketch plane, one undo step",
+          p1b.z > 2 and App.ActiveDocument.UndoNames[:1] == ["Move curve point"], (p1, p1b, App.ActiveDocument.UndoNames[:2]))
+    curve3d.finish()
+    yield 100
+
+
+def seg_move():
+    """The Move triad: bodies, faces, sketch elements in and out of a sketch, typed amounts."""
+    from kovac import commands, curve3d, editor, features, model, move, navigation, params, sketchmode, views  # noqa: F401
+    mw = Gui.getMainWindow()  # noqa: F841
+    # -- Move: the triad on a body -- drag the X arrow, then the turning handle about Z --
+    from kovac import move
+    App.newDocument("MoveTest")
+    yield 300
+    skm = sketchmode.create("XY")
+    for a, b in ((V(0, 0, 0), V(40, 0, 0)), (V(40, 0, 0), V(40, 20, 0)), (V(40, 20, 0), V(0, 20, 0)), (V(0, 20, 0), V(0, 0, 0))):
+        skm.addGeometry(Part.LineSegment(a, b))
+    sketchmode.finish()
+    yield 300
+    editor.start(features.Extrude, Profile=skm, Length=10).accept()
+    yield 300
+    bm = bodies()[0]
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(bm)
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 500
+    command("Kovac_Move")
+    yield 400
+    edm = editor.current()
+    tri = next(h for h in edm.hooks if isinstance(h, move.Triad))
+    itm = navigation.install()
+    p, axes = tri.t.frame()
+    pxm = itm.px_size()
+    sc = lambda q: QtCore.QPointF(*itm.qt(view().getPointOnViewport(q)))   # noqa: E731
+
+    def drag_vp(a, b):
+        L = QtCore.Qt.LeftButton
+        evs = [(QtCore.QEvent.MouseButtonPress, a, L)] + [(QtCore.QEvent.MouseMove, a + (b - a) * k / 12, L) for k in range(1, 13)] + \
+              [(QtCore.QEvent.MouseButtonRelease, b, QtCore.Qt.NoButton)]
+        for t, q, held in evs:
+            QtWidgets.QApplication.sendEvent(vp(), QtGui.QMouseEvent(t, q, QtCore.QPointF(vp().mapToGlobal(q.toPoint())),
+                                                                     L if t != QtCore.QEvent.MouseMove else QtCore.Qt.NoButton, held, QtCore.Qt.NoModifier))
+    drag_vp(sc(p + axes[0] * move.ARROW_PX * pxm * 0.8), sc(p + axes[0] * (move.ARROW_PX * pxm * 0.8 + 20)))
+    yield 200
+    slid = V(edm.fp.Move.Base)
+    ring = tri._ring(p + slid, axes[0], axes[1], move.RING_PX * pxm)
+    drag_vp(sc(ring[8]), sc(ring[16]) + (sc(ring[16]) - sc(ring[8])) * 0.2)
+    yield 200
+    turned = math.degrees(edm.fp.Move.Rotation.Angle)
+    check("Move: dragging the X arrow slides the body along X, the Z handle turns it",
+          slid.x > 5 and abs(slid.y) < 1e-9 and abs(slid.z) < 1e-9 and turned >= 5 and
+          (edm.fp.Move.Rotation.Axis - V(0, 0, 1)).Length < 1e-6, (slid, turned, edm.fp.Move.Rotation.Axis))
+    combo = edm.findChild(QtWidgets.QComboBox, "kovacMoveType")
+    check("the Move panel has a drop-down for what to move", combo is not None and combo.currentText() == "Bodies",
+          combo and combo.currentText())
+    edm.accept()
+    yield 300
+
+    # a face clicked, then Move: the drop-down turns the bodies move into a face move, and back
+    top = next(i for i, f in enumerate(bm.Shape.Faces) if abs(f.CenterOfMass.z - 10) < 1e-6 and f.normalAt(0, 0).z > 0.9)
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(bm, "Face%d" % (top + 1))
+    command("Kovac_Move")
+    yield 400
+    edm = editor.current()
+    edm.findChild(QtWidgets.QComboBox, "kovacMoveType").setCurrentText("Faces")
+    yield 500
+    edf = editor.current()
+    check("Move: choosing Faces moves the clicked face instead of its body",
+          edf is not None and type(edf.fp.Proxy).kind == "MoveFace" and bool(edf.fp.Face) and
+          any(isinstance(h, move.Triad) for h in edf.hooks), edf and edf.fp.Face)
+    edf.findChild(QtWidgets.QComboBox, "kovacMoveType").setCurrentText("Bodies")
+    yield 500
+    edb = editor.current()
+    check("Move: choosing Bodies again moves the face's body, the face move left nothing behind",
+          type(edb.fp.Proxy).kind == "Move" and list(edb.fp.Bodies) == [bm.BodyId] and
+          not any(type(getattr(o, "Proxy", None)).__name__ == "MoveFace" for o in App.ActiveDocument.Objects),
+          (list(edb.fp.Bodies), [o.Name for o in App.ActiveDocument.Objects]))
+    edb.reject()
+    yield 300
+
+    # -- Move in a sketch: a corner dragged up out of the plane takes both its lines into 3D --
+    App.newDocument("Move3DTest")
+    yield 300
+    skc = sketchmode.create("XY")
+    for a, b in ((V(0, 0, 0), V(40, 0, 0)), (V(40, 0, 0), V(40, 20, 0)), (V(40, 20, 0), V(0, 20, 0)), (V(0, 20, 0), V(0, 0, 0))):
+        skc.addGeometry(Part.LineSegment(a, b))
+    App.ActiveDocument.recompute()
+    yield 400
+    vtx = next(k for k in range(20) if skc.getGeoVertexIndex(k) == (0, 2))
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(skc, "Vertex%d" % (vtx + 1))
+    command("Kovac_Move")
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 800
+    tri = move._session.triad
+    itc = navigation.install()
+    p, axes = tri.t.frame()
+    pxc = itc.px_size()
+    scc = lambda q: QtCore.QPointF(*itc.qt(view().getPointOnViewport(q)))   # noqa: E731
+    drag_vp(scc(p + axes[2] * move.ARROW_PX * pxc * 0.8), scc(p + axes[2] * (move.ARROW_PX * pxc * 0.8 + 15)))
+    yield 200
+    lifted = [o for o in App.ActiveDocument.Objects if curve3d.is_curve(o)]
+    tops = [max(q.z for q in o.Points) for o in lifted]
+    check("Move in a sketch: dragging a corner up lifts it and both its lines out of the plane, one undo step",
+          len(skc.Geometry) == 2 and len(lifted) == 2 and all(z > 2 for z in tops) and
+          App.ActiveDocument.UndoNames[:1] == ["Move"], (len(skc.Geometry), tops, App.ActiveDocument.UndoNames[:2]))
+    move.finish()
+
+    # -- Move "Points" outside the sketch: a corner clicked on the sketch in the view; then a typed length --
+    App.newDocument("MovePointsTest")
+    yield 300
+    skp = sketchmode.create("XY")
+    for a, b in ((V(0, 0, 0), V(40, 0, 0)), (V(40, 0, 0), V(40, 20, 0)), (V(40, 20, 0), V(0, 20, 0)), (V(0, 20, 0), V(0, 0, 0))):
+        skp.addGeometry(Part.LineSegment(a, b))
+    sketchmode.finish()
+    App.ActiveDocument.recompute()
+    yield 400
+    corner = next(k for k, v in enumerate(skp.Shape.Vertexes) if (v.Point - V(40, 0, 0)).Length < 1e-6)
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(skp, "Vertex%d" % (corner + 1))
+    command("Kovac_Move")
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 800
+    ses = move._session
+    combo = ses.dock.widget().findChild(QtWidgets.QComboBox, "kovacMoveType")
+    check("Move on sketch points picked in the view opens as Points, with the drop-down",
+          ses is not None and ses.move_type == "Points" and combo is not None and combo.currentText() == "Points",
+          ses and ses.move_type)
+    tri = ses.triad
+    itc = navigation.install()
+    p, axes = tri.t.frame()
+    pxc = itc.px_size()
+    drag_vp(scc(p + axes[0] * move.ARROW_PX * pxc * 0.8), scc(p + axes[0] * (move.ARROW_PX * pxc * 0.8 + 25)))
+    yield 300
+    ends = lambda: sorted((g.StartPoint.x, g.EndPoint.x) for g in skp.Geometry)   # noqa: E731
+    xs = [x for pair in ends() for x in pair]
+    check("Points: dragging the X arrow moves the clicked corner, both lines stay joined there",
+          max(xs) > 41 and xs.count(max(xs)) == 2, ends())
+    field = tri.label
+    check("the triad shows an editable field with the dragged length",
+          isinstance(field, QtWidgets.QLineEdit) and field.isVisible() and "mm" in field.text(), field and field.text())
+    field.setText("25 mm")
+    field.returnPressed.emit()
+    yield 300
+    xs = [x for pair in ends() for x in pair]
+    check("typing a length in the triad's field moves the corner exactly that far, one undo step",
+          abs(max(xs) - 65) < 1e-6 and xs.count(max(xs)) == 2 and App.ActiveDocument.UndoNames[:1] == ["Move"],
+          (ends(), App.ActiveDocument.UndoNames[:3]))
+    combo.setCurrentText("Bodies")
+    yield 500
+    edb = editor.current()
+    check("Points -> Bodies in the drop-down closes the points window and opens the bodies move",
+          move._session is None and edb is not None and type(edb.fp.Proxy).kind == "Move", move._session)
+    if edb is not None:
+        edb.reject()
+    yield 300
+    yield 100
+
+
+def seg_offset():
+    """Offset in a sketch: a B-spline (which the sketcher's own Offset drops) by arrow and by typed value."""
+    from kovac import navigation, sketchmode, sketchoffset, views
+    App.newDocument("OffsetTest")
+    yield 300
+    sk = sketchmode.create("XY")
+    g = sk.addGeometry(Part.BSplineCurve([V(0, 0, 0), V(10, 20, 0), V(30, -10, 0), V(40, 10, 0)], None, None, False, 3, None, False))
+    sk.exposeInternalGeometry(g)
+    App.ActiveDocument.recompute()
+    yield 500
+    n0 = len(sk.Geometry)
+    Gui.Selection.clearSelection()
+    from kovac import sketchtools
+    views.go(view(), views.view_rotation((0, 0, 1)), fit=True)
+    yield 600
+    Gui.runCommand("Sketcher_CreateBSpline")   # the user's case: a drawing tool still on from the last curve
+    yield 400
+    was_running = sketchtools.tool_running()
+    command("Kovac_SketchOffset")              # nothing picked: it opens and waits for the curve
+    yield 400
+    waiting = sketchoffset._tool
+    check("Offset ends the drawing tool still running, then opens and waits for a curve",
+          was_running and not sketchtools.tool_running() and waiting is not None and waiting.result is None
+          and "Click" in waiting.status.text(), (was_running, sketchtools.tool_running(), waiting))
+    curve = sk.Geometry[g]
+    on = to_qt(curve.value((curve.FirstParameter + curve.LastParameter) * 0.3))
+    for k in (6, 3, 0):                        # hover in, so the sketcher preselects the curve, then click
+        mouse(QtCore.QEvent.MouseMove, on + QtCore.QPoint(k, 0))
+        yield 80
+    mouse(QtCore.QEvent.MouseButtonPress, on, QtCore.Qt.LeftButton, QtCore.Qt.LeftButton)
+    mouse(QtCore.QEvent.MouseButtonRelease, on, QtCore.Qt.LeftButton, QtCore.Qt.NoButton)
+    yield 500
+    tool = sketchoffset._tool
+    check("clicking the curve picks it for the offset (no pole added by a leftover tool)",
+          tool is not None and tool.picks == [g] and len(sk.Geometry) == n0, (tool and tool.picks, len(sk.Geometry), n0))
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 400
+    check("Offset on a B-spline opens Kovač's offset with a live preview",
+          tool is not None and tool.result and isinstance(tool.result[0], Part.BSplineCurve) and tool.preview_node is not None,
+          tool and tool.result)
+    if tool is None:
+        return
+    it = navigation.install()
+    a, b = tool.arrow.seg
+    sc = lambda q: QtCore.QPointF(*it.qt(view().getPointOnViewport(q)))   # noqa: E731
+    d0 = tool.d
+    start, end = sc((a + b) * 0.5), sc((a + b) * 0.5 + tool.arrow.n * 6)
+    Lb = QtCore.Qt.LeftButton
+    for t, q, held in [(QtCore.QEvent.MouseButtonPress, start, Lb)] + \
+            [(QtCore.QEvent.MouseMove, start + (end - start) * k / 10, Lb) for k in range(1, 11)] + \
+            [(QtCore.QEvent.MouseButtonRelease, end, QtCore.Qt.NoButton)]:
+        QtWidgets.QApplication.sendEvent(vp(), QtGui.QMouseEvent(t, q, QtCore.QPointF(vp().mapToGlobal(q.toPoint())),
+                                                                 Lb if t != QtCore.QEvent.MouseMove else QtCore.Qt.NoButton, held,
+                                                                 QtCore.Qt.NoModifier))
+    yield 200
+    check("dragging the offset arrow inside the sketch changes the distance", tool.d > d0 + 3, (d0, tool.d))
+    corners = tool.dock.widget().findChild(QtWidgets.QWidget, "kovacOffsetCorners")
+    check("the offset panel offers round or sharp corners", corners is not None and
+          list(corners.buttons) == ["Round corners", "Sharp corners"], corners and list(corners.buttons))
+    tool.field.setText("4 mm")
+    tool.field.returnPressed.emit()
+    yield 400
+    new = [x for x in sk.Geometry[n0:] if isinstance(x, Part.BSplineCurve)]
+    base = Part.BSplineCurve([V(0, 0, 0), V(10, 20, 0), V(30, -10, 0), V(40, 10, 0)], None, None, False, 3, None, False).toShape()
+    err = max(abs(Part.Vertex(new[0].value(new[0].FirstParameter + (new[0].LastParameter - new[0].FirstParameter) * k / 30))
+                  .distToShape(base)[0] - 4) for k in range(31)) if new else None
+    check("typing 4 mm and Enter adds the offset spline 4 mm away, one undo step",
+          sketchoffset._tool is None and len(new) == 1 and err < 1e-3 and App.ActiveDocument.UndoNames[:1] == ["Offset"],
+          (len(new), err, App.ActiveDocument.UndoNames[:2]))
+    # sharp corners on a rectangle's outline: four longer lines, no arcs
+    Gui.Selection.clearSelection()
+    r0 = len(sk.Geometry)
+    c = [V(60, 0, 0), V(100, 0, 0), V(100, 20, 0), V(60, 20, 0)]
+    for k in range(4):
+        sk.addGeometry(Part.LineSegment(c[k], c[(k + 1) % 4]))
+    App.ActiveDocument.recompute()
+    yield 300
+    for k in range(4):
+        Gui.Selection.addSelection(sk, "Edge%d" % (r0 + k + 1))
+    command("Kovac_SketchOffset")
+    yield 400
+    tool = sketchoffset._tool
+    tool.dock.widget().findChild(QtWidgets.QWidget, "kovacOffsetCorners").setCurrentText("Sharp corners")
+    tool.set(abs(tool.d) if tool.d else 2)
+    if tool.result and any(isinstance(x, Part.LineSegment) and max(x.StartPoint.x, x.EndPoint.x) < 100 + 1e-9
+                           and min(x.StartPoint.x, x.EndPoint.x) > 60 - 1e-9 and abs(x.StartPoint.y - x.EndPoint.y) < 1e-9
+                           and x.StartPoint.y > 0 and x.StartPoint.y < 20 for x in tool.result):
+        tool.set(-tool.d)                       # it went inside: take the outside
+    tool.field.setText("3 mm" if tool.d > 0 else "-3 mm")
+    tool.field.returnPressed.emit()
+    yield 400
+    added = sk.Geometry[r0 + 4:]
+    bb = Part.Compound([x.toShape() for x in added]).BoundBox if added else None
+    check("sharp corners: a rectangle offsets to a larger rectangle of four lines, no rounded corners",
+          len(added) == 4 and all(isinstance(x, Part.LineSegment) for x in added) and bb and
+          abs(bb.XLength - 46) < 1e-6 and abs(bb.YLength - 26) < 1e-6, (len(added), bb))
+    sketchmode.finish()
+    yield 300
+
+
+def seg_assembly():
+    """Components, a joint picked by clicking, dragging a hinged part, instances, Move Components."""
+    import Sketcher
+    from kovac import assemble, components, editor, features, joints, model, move, navigation, sketchmode, tree, views
+    doc = App.newDocument("AssemblyTest")
+    yield 300
+
+    def sk_of(geos, name):
+        sk = sketchmode.create("XY", name=name)
+        for g in geos:
+            sk.addGeometry(g)
+        sketchmode.finish()
+        return sk
+    pts = [V(0, 0, 0), V(60, 0, 0), V(60, 40, 0), V(0, 40, 0)]
+    plate_sk = sk_of([Part.LineSegment(pts[i], pts[(i + 1) % 4]) for i in range(4)], "Plate")
+    yield 300
+    editor.start(features.Extrude, Profile=plate_sk, Length=10).accept()
+    yield 300
+    hole = sk_of([Part.Circle(V(15, 20, 0), V(0, 0, 1), 5)], "Hole")
+    hole.addConstraint(Sketcher.Constraint("DistanceX", -1, 1, 0, 3, 15))
+    hole.addConstraint(Sketcher.Constraint("DistanceY", -1, 1, 0, 3, 20))
+    yield 300
+    ed = editor.start(features.Extrude, Profile=hole, Length=10)
+    ed.fp.Operation = "Cut"
+    ed.accept()
+    yield 300
+    pin_sk = sk_of([Part.Circle(V(100, 0, 0), V(0, 0, 1), 4.5)], "Pin")
+    yield 300
+    ed = editor.start(features.Extrude, Profile=pin_sk, Length=30)
+    ed.fp.Operation = "New body"
+    ed.accept()
+    yield 400
+    plate_b = next(b for b in bodies() if b.Shape.BoundBox.XMax > 59)
+    pin_b = next(b for b in bodies() if b is not plate_b)
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 500
+
+    # -- New Component from a clicked body (twice) --
+    Gui.Selection.clearSelection()
+    click_at(V(45, 30, 10))
+    yield 200
+    command("Kovac_NewComponent")
+    yield 300
+    plate_c = components.holder(plate_b)
+    Gui.Selection.clearSelection()
+    click_at(V(100, 0, 30))
+    yield 200
+    command("Kovac_NewComponent")
+    yield 400
+    pin_c = components.holder(pin_b)
+    br = Gui.getMainWindow().findChild(QtWidgets.QFrame, "kovacBrowser")
+    tw = br.findChild(QtWidgets.QTreeWidget) if br else None
+    labels = [it.text(0) for it in tw.findItems("", QtCore.Qt.MatchContains | QtCore.Qt.MatchRecursive)] if tw else []
+    check("New Component: each clicked body (and its sketch) goes into a component of its own, shown at the top of the browser",
+          plate_c is not None and pin_c is not None and plate_c != pin_c and pin_sk in pin_c.Group and
+          plate_c.Label in labels and pin_c.Label in labels, (plate_c and plate_c.Label, pin_c and pin_c.Label, labels[:12]))
+
+    # -- Joint: hover shows markers, click the hole's rim then the pin's top rim --
+    command("Kovac_Joint")
+    yield 300
+    tool = assemble._tool
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 400
+    rim = V(15 + 5 * math.cos(math.radians(225)), 20 + 5 * math.sin(math.radians(225)), 10)   # the rim, facing the camera
+    mouse(QtCore.QEvent.MouseMove, to_qt(rim))
+    yield 200
+    check("Joint: hovering the hole's rim shows a joint-origin marker", tool is not None and len(tool.nodes) >= 1,
+          tool and len(tool.nodes))
+    click_at(rim)
+    yield 300
+    pin_rim = V(104.5, 0, 30)
+    click_at(pin_rim)
+    yield 500
+    j = tool.joint if tool else None
+    check("Joint: two clicks make the joint, the pin snaps onto the hole and the plate is grounded",
+          j is not None and joints.satisfied(j) and joints.grounded(doc) == [plate_c] and
+          (pin_c.Placement.multVec(V(100, 0, 30)) - V(15, 20, 10)).Length < 1e-4,
+          (j and j.Label, tool and tool.status.text(), pin_c.Placement))
+    tool.choice.setCurrentText("Revolute")
+    yield 300
+    press([b for b in tool.dock.findChildren(QtWidgets.QPushButton) if b.text() == "OK"][0])
+    yield 400
+    check("Joint: Revolute chosen in the panel, OK keeps it as one undo step",
+          j.JointType == "Revolute" and doc.UndoNames[:1] == ["Joint"] and assemble._tool is None, (j.JointType, doc.UndoNames[:3]))
+    yield 300
+    jl = [it.text(0) for it in tw.findItems("Joints", QtCore.Qt.MatchStartsWith | QtCore.Qt.MatchRecursive)] if tw else []
+    check("the browser's Joints folder lists the joint and the ground", jl == ["Joints  (2)"], jl)
+    shot("assembly_joint")
+
+    # -- Drag: the pin turns about the hole's axis, the plate holds still --
+    command("Kovac_DragComponent")
+    yield 200
+    rot0 = App.Rotation(pin_c.Placement.Rotation)
+    side = pin_c.Placement.multVec(V(104.5, 0, 15))
+    a = to_qt(side)
+    b = a + QtCore.QPoint(40, 30)
+    L = QtCore.Qt.LeftButton
+    mouse(QtCore.QEvent.MouseButtonPress, a, L, L)
+    for k in range(1, 9):
+        mouse(QtCore.QEvent.MouseMove, a + (b - a) * (k / 8), QtCore.Qt.NoButton, L)
+        yield 30
+    mouse(QtCore.QEvent.MouseButtonRelease, b, L, QtCore.Qt.NoButton)
+    yield 300
+    turned = math.degrees(rot0.inverted().multiply(pin_c.Placement.Rotation).Angle)
+    check("Drag: pulling the pin turns it about the hinge; the joint holds and the grounded plate stays",
+          joints.satisfied(j) and plate_c.Placement.isSame(App.Placement(), 1e-9) and
+          (pin_c.Placement.multVec(V(100, 0, 30)) - V(15, 20, 10)).Length < 1e-4 and turned > 1,
+          (turned, pin_c.Placement))
+    command("Kovac_DragComponent")              # the command again ends dragging
+    yield 200
+
+    # -- the hole moves by its dimension: the joint follows --
+    with __import__("kovac").commands.transaction("Edit hole", doc):
+        hole.setDatum(0, App.Units.Quantity("25 mm"))
+        model.commit(doc)
+    yield 400
+    check("a joint follows its hole when the hole's dimension changes",
+          j.KovacStatus == "" and (pin_c.Placement.multVec(V(100, 0, 30)) - V(25, 20, 10)).Length < 1e-4, pin_c.Placement)
+
+    # -- New Instance, then Move Components on it --
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(pin_c)
+    command("Kovac_NewInstance")
+    yield 400
+    inst = next((o for o in doc.Objects if components.is_instance(o)), None)
+    check("New Instance: a linked copy of the pin component sits beside it", inst is not None and inst.Label.endswith("(2)"),
+          inst and inst.Label)
+    before = App.Placement(inst.Placement)
+    command("Kovac_Move")
+    yield 400
+    sess = move._session
+    check("Move with a component selected moves the component (Components in the drop-down)",
+          sess is not None and sess.move_type == "Components", sess and sess.move_type)
+    if sess is not None:
+        sess.begin(0)
+        sess.translate(0, 12)
+        sess.end()
+        yield 200
+        check("Move Components: the instance moves 12 mm along X, not a history step",
+              (inst.Placement.Base - before.Base - V(12, 0, 0)).Length < 1e-6 and
+              not any(type(getattr(o, "Proxy", None)).__name__ == "Transform" for o in model.items(doc)),
+              inst.Placement)
+        move.finish()
+    yield 200
+
+    # -- undo the joint: gone, the pin back where it was --
+    for _ in range(10):
+        if doc.UndoNames and doc.UndoNames[0] == "Joint":
+            break
+        doc.undo()
+        yield 100
+    doc.undo()
+    yield 400
+    check("Undo removes the joint again", not joints.all_joints(doc), [o.Name for o in joints.all_joints(doc)])
+
+
+SEGMENTS = [("bracket", seg_bracket), ("curve3d", seg_curve3d), ("move", seg_move), ("offset", seg_offset),
+            ("assembly", seg_assembly)]
+
+
+def scenario():
+    """Every segment, or only those named in KOVAC_SEGMENTS (comma separated), each on
+    its own document after the common start-up."""
+    wanted = [s.strip() for s in os.environ.get("KOVAC_SEGMENTS", "").split(",") if s.strip()]
+    unknown = set(wanted) - {n for n, _ in SEGMENTS}
+    if unknown:
+        res["errors"].append("unknown segments: %s" % sorted(unknown))
+    yield from setup()
+    for name, seg in SEGMENTS:
+        if not wanted or name in wanted:
+            yield from seg()
 
 
 def run(gen):

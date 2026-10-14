@@ -29,12 +29,13 @@ SKETCH_TOOLS = [      # an inner list is one button with its variants behind the
                 ("Sketcher_CreatePoint", "spoint")]),
     ("Modify", [[("Sketcher_CreateFillet", "sk_fillet"), ("Sketcher_CreateChamfer", "sk_chamfer")],
                 ("Sketcher_Trimming", "trim"), ("Sketcher_Extend", "extend"), ("Sketcher_Split", "sk_split"),
-                ("Sketcher_Offset", "offset"), ("Sketcher_Symmetry", "sk_mirror"),
+                ("Kovac_SketchOffset", "offset"), ("Sketcher_Symmetry", "sk_mirror"),
                 [("Sketcher_Translate", "sk_move"), ("Sketcher_Rotate", "sk_rotate"), ("Sketcher_Scale", "sk_scale"),
                  ("Sketcher_RectangularArray", "sk_array")],
                 ("Sketcher_ToggleConstruction", "construction")]),
     ("Constrain", [("Sketcher_Dimension", "dimension"),
-                   [("Sketcher_ConstrainCoincident", "c_coincident"), ("Sketcher_ConstrainPointOnObject", "c_pointon")],
+                   [("Sketcher_ConstrainCoincident", "c_coincident"), ("Sketcher_ConstrainPointOnObject", "c_pointon"),
+                    ("Kovac_ConstrainMidpoint", "c_midpoint")],
                    [("Sketcher_ConstrainHorizontal", "c_horizontal"), ("Sketcher_ConstrainVertical", "c_vertical")],
                    [("Sketcher_ConstrainParallel", "c_parallel"), ("Sketcher_ConstrainPerpendicular", "c_perpendicular")],
                    ("Sketcher_ConstrainTangent", "c_tangent"),
@@ -44,7 +45,7 @@ SKETCH_TOOLS = [      # an inner list is one button with its variants behind the
                     ("Sketcher_ConstrainDistance", "c_dist")],
                    [("Sketcher_ConstrainRadius", "c_radius"), ("Sketcher_ConstrainDiameter", "c_diameter")],
                    ("Sketcher_ConstrainAngle", "c_angle"), ("Sketcher_ToggleDrivingConstraint", "c_driving")]),
-    ("3D", [("Sketcher_Projection", "project"), ("Sketcher_CarbonCopy", "carbon"), ("Sketcher_ViewSketch", "sk_look"),
+    ("3D", [("Kovac_Curve3D", "spline"), ("Sketcher_Projection", "project"), ("Sketcher_CarbonCopy", "carbon"), ("Sketcher_ViewSketch", "sk_look"),
             ("Sketcher_ViewSection", "sk_section")]),
 ]
 _ICON_OF = {cid: icon for _, tools in SKETCH_TOOLS for e in tools for cid, icon in (e if isinstance(e, list) else [e])}
@@ -57,6 +58,10 @@ def tool_icon(cid):
 
 KOVAC_KEYS = ("S",)     # sketcher shortcuts that would shadow Kovač's own keys are left off
 _ui = {}
+
+
+def _is_datum_plane(obj):
+    return type(getattr(obj, "Proxy", None)).__name__ == "DatumPlane" and not getattr(obj, "Auto", False)
 
 
 def _face_plane(obj, sub):
@@ -83,6 +88,8 @@ def overview(view=None, fit=None):
 def start(then=None):
     """Sketch on the selected flat face/plane, or let the user pick one; `then` is a sketch
     tool to start once the sketch is open."""
+    from kovac import curve3d
+    curve3d.finish()
     doc = App.ActiveDocument
     if doc is None:
         from kovac import startpage
@@ -90,7 +97,7 @@ def start(then=None):
         doc = App.ActiveDocument
     for s in Gui.Selection.getSelectionEx("", 0):
         for sub in s.SubElementNames or [""]:
-            if type(getattr(s.Object, "Proxy", None)).__name__ == "DatumPlane" and not sub:
+            if _is_datum_plane(s.Object):         # picked in the view it comes with "Face1"
                 return create(base=s.Object.Name, then=then)
             if _face_plane(s.Object, sub) is not None and model.pick_ref(s.Object, sub):
                 return create(base=model.pick_ref(s.Object, sub), then=then)
@@ -194,6 +201,10 @@ class PlanePicker:
         info = it.info_at(pos)
         if info:
             obj, sub = it.target(info)
+            if _is_datum_plane(obj):
+                self.cancel()
+                create(base=obj.Name, then=self.then)
+                return True
             if _face_plane(obj, sub) is not None and model.pick_ref(obj, sub):
                 ref = model.pick_ref(obj, sub)
                 self.cancel()
@@ -233,6 +244,8 @@ def create(base="XY", name="Sketch", then=None):
             plane.ViewObject.Visibility = False
         doc.recompute()
         sk = datum.sketch_on(doc, plane, name)
+        from kovac import components
+        components.adopt(sk, components.holder(plane) if components.root(doc) else None)
         model.insert(doc, sk)
         model.commit(doc)
     edit(sk, view)
@@ -286,6 +299,10 @@ def in_sketch():
     return obj is not None and obj.Object.TypeId.startswith("Sketcher::")
 
 
+def tool_ids():
+    return [cid for _, tools in SKETCH_TOOLS for e in tools for cid, _ in (e if isinstance(e, list) else [e])]
+
+
 def _tool_action(cid, icon, parent):
     """Our own button for a sketcher command (FreeCAD makes its actions only for its own bars)."""
     cmd = Gui.Command.get(cid)
@@ -295,9 +312,13 @@ def _tool_action(cid, icon, parent):
     text = info.get("menuText", cid).replace("&", "")
     a = QtGui.QAction(QtGui.QIcon(kovac.icon(icon)), text, parent)
     a.setObjectName(cid)
-    key = info.get("shortcut", "")
+    key = cmd.getShortcut() or info.get("shortcut", "")
+    for own in cmd.getAction():           # the key moves to our button; two actions on one key fire neither
+        own.setShortcut(QtGui.QKeySequence())
+    if key in KOVAC_KEYS:
+        key = ""
     a.setToolTip("%s%s\n%s" % (text, "  (%s)" % key if key else "", info.get("toolTip", "")))
-    if key and key not in KOVAC_KEYS:
+    if key:
         a.setShortcut(QtGui.QKeySequence(key))
     a.triggered.connect(lambda _=False, c=cid: (sketchtools.stop(), commands.run(c)))   # recorded for "repeat last"
     return a

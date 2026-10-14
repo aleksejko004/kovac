@@ -1,6 +1,6 @@
 # Architecture
 
-Kovač is a FreeCAD addon (`Kovac/`) plus a branding layer (`dist/`). FreeCAD 1.1.4 is the engine; Kovač is the user experience. See ADR-0001 (addon first), ADR-0002 (body/feature model) and ADR-0003 (reference layer).
+Kovač is a FreeCAD addon (`Kovac/`) plus a branding layer (`dist/`). FreeCAD 1.1.4 is the engine; Kovač is the user experience. See ADR-0001 (addon first), ADR-0002 (body/feature model), ADR-0003 (reference layer) and ADR-0004 (components and joints, proposed).
 
 ```
 FreeCAD 1.1.4 (unmodified)                Kovač addon (Kovac/kovac/)
@@ -40,6 +40,10 @@ Part / Sketcher / PartDesign / …                         zoom to cursor, click
                                           sketchmode.py sketch entry and Finish Sketch
                                           manip.py      arrow manipulator with floating value field
                                           grid.py       ground grid and snapping
+                                          ── assemblies (ADR-0004) ─────────────────────────
+                                          components.py components, instances, frames, picks through them
+                                          joints.py     joint origins, snaps, solve check, drag
+                                          assemble.py   New Component / Instance, Joint, Drag, Ground
                                           params.py     named parameters
                                           inspect_tools.py mass properties, interference, section,
                                                         draft analysis, materials panel

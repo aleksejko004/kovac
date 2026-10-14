@@ -40,9 +40,19 @@ def sketch_curves(sketch):
     return out
 
 
-def sketch_points(sketch):
-    """Global positions of non-construction sketch points (hole centres)."""
-    pl = sketch.getGlobalPlacement()
+def placement(sketch, local=False):
+    """A sketch's global placement, or with local its placement inside its component: what
+    features compute with (ADR-0004)."""
+    if local:
+        from kovac import components
+        return components.local_placement(sketch)
+    return sketch.getGlobalPlacement()
+
+
+def sketch_points(sketch, local=False):
+    """Positions of non-construction sketch points (hole centres): global, or in the
+    sketch's component (local)."""
+    pl = placement(sketch, local)
     return [pl.multVec(V(g.X, g.Y, g.Z)) for i, g in enumerate(sketch.Geometry)
             if isinstance(g, Part.Point) and not sketch.getConstruction(i)]
 
@@ -150,9 +160,9 @@ def find(curves):
     return regions
 
 
-def of_sketch(sketch):
-    """Regions of a sketch in global coordinates."""
-    pl = sketch.getGlobalPlacement()
+def of_sketch(sketch, local=False):
+    """Regions of a sketch in global coordinates, or (local) in its component's."""
+    pl = placement(sketch, local)
     out = []
     m = pl.toMatrix()
 

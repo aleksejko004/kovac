@@ -60,6 +60,15 @@ def in_edit():
     return bool(gd and gd.getInEdit())
 
 
+def camera_focus(cam):
+    """The point cam is looking at (its orbit centre): position, stepped back along view
+    direction by focalDistance. Works for both camera kinds; it is the most robust 'what is
+    this view centred on' a caller can get without a model or a successful ray cast."""
+    pos3 = V(*cam.position.getValue().getValue())
+    rot = App.Rotation(*cam.orientation.getValue().getValue())
+    return pos3 - rot.multVec(V(0, 0, 1)) * cam.focalDistance.getValue()
+
+
 class Band(QtWidgets.QWidget):
     """Window (solid accent) vs crossing (dashed green) rectangle."""
 
@@ -137,6 +146,7 @@ class Interactor(QtCore.QObject):
         self.hold = QtCore.QTimer(self, singleShot=True, interval=HOLD_MS)
         self.hold.timeout.connect(self._hold_fired)
         self.marker = None
+        self.vp.setAcceptDrops(True)      # a material dragged from its panel onto a body
         self.vp.installEventFilter(self)
 
     # ------------------------------------------------------------ helpers
@@ -164,6 +174,24 @@ class Interactor(QtCore.QObject):
             return 0 if el.startswith("Vertex") else 1 if el.startswith("Edge") else 2
         return min(near, key=rank)
 
+    def drop_material(self, ev):
+        """A material dragged out of its panel and dropped on a body: assign it there."""
+        if not ev.mimeData().hasFormat(kovac.MATERIAL_MIME):
+            return False
+        info = self.info_at(ev.position().toPoint())
+        if info is None:
+            return False
+        doc = App.getDocument(info["Document"])
+        obj = doc.getObject(info["Object"])
+        if obj is None or type(getattr(obj, "Proxy", None)).__name__ != "BodyProxy":
+            return False
+        key = bytes(ev.mimeData().data(kovac.MATERIAL_MIME)).decode("utf-8")
+        from kovac import commands, inspect_tools
+        with commands.transaction("Material", doc):
+            inspect_tools.apply_material(obj, key)
+        ev.acceptProposedAction()
+        return True
+
     def in_cube(self, pos):
         """Inside the orientation cube's corner square (NaviCube parameters)."""
         g = App.ParamGet("User parameter:BaseApp/Preferences/NaviCube")
@@ -180,6 +208,11 @@ class Interactor(QtCore.QObject):
         grid.sketch_target), and the snap marker shows it; FreeCAD's own snapping then lands
         exactly there. Not while panning, not with Alt held."""
         if not in_edit():
+            return False
+        if self.drag and self.drag[0] == "hook":
+            return False                         # a tool's own drag (Move's triad) does its own snapping
+        if ev.type() == QtCore.QEvent.MouseButtonPress and any(
+                getattr(h, "in_edit", False) and h.handle_at(self, ev.position().toPoint()) is not None for h in hooks):
             return False
         if ev.modifiers() & QtCore.Qt.AltModifier:
             self.snap_marker.hide()
@@ -231,10 +264,7 @@ class Interactor(QtCore.QObject):
                 box.add(shape.BoundBox)
         if box.isValid():
             return box.Center
-        cam = self.camera()
-        pos3 = V(*cam.position.getValue().getValue())
-        rot = App.Rotation(*cam.orientation.getValue().getValue())
-        return pos3 - rot.multVec(V(0, 0, 1)) * cam.focalDistance.getValue()
+        return camera_focus(self.camera())
 
     def px_size(self):
         """World length of one screen pixel at the focal plane."""
@@ -258,6 +288,13 @@ class Interactor(QtCore.QObject):
         if getattr(self, "replaying", False):
             return False
         try:
+            if t in (QtCore.QEvent.DragEnter, QtCore.QEvent.DragMove):
+                if ev.mimeData().hasFormat(kovac.MATERIAL_MIME):
+                    ev.acceptProposedAction()
+                    return True
+                return False
+            if t == QtCore.QEvent.Drop:
+                return self.drop_material(ev)
             if t in (QtCore.QEvent.MouseMove, QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonRelease) \
                     and self.snap_sketch(ev):
                 return True
@@ -304,6 +341,11 @@ class Interactor(QtCore.QObject):
                 self.drag = ("gesture", pos, pos, ev.globalPosition().toPoint())
                 return True
         if in_edit():
+            if button == "Left" and not mods:
+                for h in list(hooks):            # a tool that works inside a sketch (Move's triad) goes first
+                    if getattr(h, "in_edit", False) and h.press(self, pos):
+                        self.drag = ("hook", pos, pos, h)
+                        return True
             return False
         if button == "Right" and not mods:
             from kovac import radial
@@ -547,9 +589,7 @@ class Interactor(QtCore.QObject):
                     box.add(s.Object.Shape.BoundBox)
             pivot = box.Center
         else:
-            pos3 = V(*cam.position.getValue().getValue())
-            rot = App.Rotation(*cam.orientation.getValue().getValue())
-            pivot = pos3 - rot.multVec(V(0, 0, 1)) * cam.focalDistance.getValue()
+            pivot = camera_focus(cam)
         self.show_marker(pivot)
         return pivot
 
@@ -643,6 +683,80 @@ def set_filter(kinds):
     Gui.Selection.removeSelectionGate()
     if kinds:
         Gui.Selection.addSelectionGate(selection.Gate(kinds))
+
+
+class _SelectionHighlight:
+    """Translucent wash over the whole shape of every selected object, not just the clicked
+    face -- layered under FreeCAD's own per-element selection colour, not replacing it (see
+    overlay.shape_node). Off while sketching: 2D sketch elements have no whole-body shape."""
+
+    def __init__(self):
+        self.node, self.view = None, None
+
+    def _clear(self):
+        if self.node is not None and self.view is not None:
+            from kovac import overlay
+            overlay.remove(self.node, self.view)
+        self.node = self.view = None
+
+    def _refresh(self):
+        self._clear()
+        try:
+            self._build()
+        except Exception:
+            pass      # a selection observer that raises can interrupt whatever called it (a
+                       # cube-click's own view-snap, mid-sequence) -- never let this one do that
+
+    def _build(self):
+        if in_edit():
+            return
+        view = Gui.activeView()
+        if view is None or not hasattr(view, "graphicsView"):
+            return
+        from kovac import overlay, palette
+        from pivy import coin
+        sep = None
+        for s in Gui.Selection.getSelectionEx("*", 0):
+            o = s.Object
+            shape = getattr(o, "Shape", None)
+            vo = getattr(o, "ViewObject", None)
+            if shape is None or shape.isNull() or (vo is not None and not vo.Visibility):
+                continue
+            sep = sep or coin.SoSeparator()
+            sep.addChild(overlay.shape_node(shape, palette.SEMANTIC["select"]))
+        if sep is not None:
+            self.node = overlay.add(sep, view)
+            self.view = view
+
+    def addSelection(self, *_a):
+        self._refresh()
+
+    def removeSelection(self, *_a):
+        self._refresh()
+
+    def setSelection(self, *_a):
+        self._refresh()
+
+    def clearSelection(self, *_a):
+        try:
+            self._clear()
+        except Exception:
+            pass
+
+    def slotRecomputedDocument(self, _doc):     # the selected shape changed: wash the new one, not the old
+        if self.node is not None:
+            QtCore.QTimer.singleShot(0, self._refresh)
+
+
+_sel_highlight = None
+
+
+def install_selection_highlight():
+    global _sel_highlight
+    if _sel_highlight is None:
+        _sel_highlight = _SelectionHighlight()
+        Gui.Selection.addObserver(_sel_highlight)
+        App.addDocumentObserver(_sel_highlight)
 
 
 def install(view=None):

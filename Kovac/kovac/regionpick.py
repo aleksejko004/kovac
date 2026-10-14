@@ -20,8 +20,14 @@ class RegionPicker:
             return []
 
     def chosen(self, rs):
+        """Highlighted as already part of the profile: the stored keys; failing that, the
+        single default region when there is only one to choose -- matching _sketch_regions,
+        so the preview never silently includes more than the panel shows as chosen."""
         keys = list(self.ed.fp.Regions)
-        return set(keys) if keys else {r.key for r in regions.default(rs)}
+        if keys:
+            return set(keys)
+        auto = regions.default(rs)
+        return {r.key for r in auto} if len(auto) == 1 else set()
 
     def refresh(self):
         overlay.remove(self.node)
@@ -87,7 +93,13 @@ class ProfileHover:
         self.cache = {}
 
     def regions(self, sk):
-        key = (sk.Name, len(sk.Geometry), round(sk.Shape.Length, 6), str(sk.getGlobalPlacement()))
+        try:                     # an empty sketch (only construction lines, or one the solver failed) has no shape
+            length = round(sk.Shape.Length, 6) if not sk.Shape.isNull() else 0.0
+        except Exception:
+            length = None
+        if length is None or length == 0.0:
+            return []
+        key = (sk.Name, len(sk.Geometry), length, str(sk.getGlobalPlacement()))
         if self.cache.get(sk.Name, (None,))[0] != key:
             try:
                 rs = regions.of_sketch(sk)

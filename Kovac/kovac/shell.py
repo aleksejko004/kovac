@@ -18,13 +18,15 @@ MODES = ("Design", "Drawing", "Make", "Simulate", "Render")
 # mode -> [(group label, [command ids])]; our own group names, by function
 # an entry that is a list becomes one dropdown button
 GROUPS = {
-    "Design": [("Sketch", ["Kovac_Sketch"]),
+    "Design": [("Sketch", ["Kovac_Sketch", "Kovac_Curve3D"]),
+               ("Move", ["Kovac_Move"]),
                ("Form", ["Kovac_Extrude", "Kovac_Revolve", "Kovac_Sweep", "Kovac_Loft", "Kovac_Hole", "Kovac_Thread",
                          ["Kovac_Box", "Kovac_Cylinder", "Kovac_Sphere", "Kovac_Cone", "Kovac_Torus"]]),
                ("Shape", ["Kovac_FacePull", "Kovac_Fillet", "Kovac_Chamfer", "Kovac_Shell", "Kovac_Draft", "Kovac_DeleteFace",
-                          ["Kovac_Combine", "Kovac_Split"], ["Kovac_Move", "Kovac_Scale", "Kovac_Mirror"],
+                          ["Kovac_Combine", "Kovac_Split"], ["Kovac_Scale", "Kovac_Mirror"],
                           ["Kovac_PatternRect", "Kovac_PatternCirc"]]),
                ("Reference", [["Kovac_Plane", "Kovac_Axis", "Kovac_Point"]]),
+               ("Assemble", [["Kovac_NewComponent", "Kovac_NewInstance"], "Kovac_Joint", "Kovac_DragComponent", "Kovac_Ground"]),
                ("Check", ["Kovac_Measure", ["Kovac_MassProperties", "Kovac_Interference", "Kovac_Section", "Kovac_DraftAnalysis"]]),
                ("Model", ["Kovac_Parameters", "Kovac_Material"]),
                ("Bring in", [["Kovac_ImportStep", "Kovac_ExportStep"]]),
@@ -230,6 +232,8 @@ def about():
 def register():
     from kovac import design, drawmode, inspect_tools, params
     design.register()
+    from kovac import assemble
+    assemble.register()
     drawmode.register()
     inspect_tools.register()
     params.register()
@@ -266,7 +270,7 @@ def register():
         lambda: _ui["tree"].widget().save_view(), active=commands.has_doc)
     add("Kovac_FitAll", "Fit all", "Zoom to show the whole model", view(lambda v: v.fitAll()), icon=kovac.icon("zoom"))
     add("Kovac_Grid", "Grid and snap", "Show the grid; clicked points and sketch drawing snap to it",
-        _lazy("grid", "toggle"), icon=kovac.icon("grid"))
+        _lazy("grid", "toggle"), icon=kovac.icon("grid"), key="F3")
     add("Kovac_OrbitMode", "Free / turntable orbit", "Switch between free and turntable (around Z) orbit", _toggle_orbit_mode)
     for kind in ("Orbit", "Pan", "Zoom"):
         add("Kovac_LeftDrag_" + kind, kind, "Left-drag %ss (click again for selection)" % kind.lower(),
@@ -590,6 +594,11 @@ def initialize(wb):
     wb.appendMenu(["&Kovač", "Views"], [c for c in commands.REGISTRY if c.startswith("Kovac_View_")])
     wb.appendMenu(["&Kovač", "Selection filter"], [c for c in commands.REGISTRY if c.startswith("Kovac_Filter_")])
     wb.appendMenu(["&Kovač", "Mode"], [c for c in commands.REGISTRY if c.startswith("Kovac_Mode_")])
+    # Same for the sketcher's tools: sketches stay in Kovač (no switch to FreeCAD's sketcher
+    # workbench), so without this their default keys ("G, L", ...) were never registered at all.
+    import SketcherGui  # noqa: F401  (registers the sketcher commands)
+    from kovac import sketchmode
+    wb.appendMenu(["&Kovač", "Sketch"], [c for c in sketchmode.tool_ids() if not c.startswith("Kovac_")])
 
 
 def activated():
@@ -611,6 +620,7 @@ def activated():
     for ms in (0, 400):
         QtCore.QTimer.singleShot(ms, lambda: (arrange(), apply_visibility()))
     navigation.install()
+    navigation.install_selection_highlight()
     from kovac import drawmode, grid
     grid.start()
     drawmode.install()

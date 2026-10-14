@@ -13,6 +13,7 @@ Kovač's own code is **LGPL-2.1-or-later** (see `LICENSE`). M1 and M2 add **no n
 | Qt | 6.8.3 | LGPL-3.0-only (open-source option) | all widgets |
 | PySide6 | 6.8.3 | LGPL-3.0-only | Qt from Python |
 | Python | 3.11.14 | PSF-2.0 | addon runtime |
+| OndselSolver | 1.0.1 | LGPL-2.1 (FreeCAD's `ThirdPartyLibraries.html`) | assemblies: the joint solver behind FreeCAD's Assembly workbench, called through `Assembly::AssemblyObject.solve()` (ADR-0004, proposed) |
 | pythonocc-core | 7.8.1.1 | LGPL-3.0 (verified from `OCC/LICENSE` in the build) | M2: OCCT draft-angle operation (`BRepOffsetAPI_DraftAngle`), which FreeCAD's Python API does not expose |
 
 LGPL-2.1-or-later code may be combined with LGPL-3.0 libraries (the "or later" clause allows LGPL-3.0 terms).

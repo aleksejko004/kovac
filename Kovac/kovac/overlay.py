@@ -45,32 +45,84 @@ def face_node(face, color, transparency=0.5, offset=True, pickable=True):
     return sep
 
 
-def arrow_node(origin, tip, color, radius):
-    """Line from origin to tip with a cone at the tip, drawn on top of the model."""
+def shape_node(shape, color, transparency=0.75, pickable=False):
+    """Every face of shape tessellated into one translucent wash -- a whole-object highlight,
+    dim enough to sit under the crisper per-face one FreeCAD's own selection colour draws,
+    not replace it."""
+    coin = _coin()
+    sep = coin.SoSeparator()
+    if not pickable:
+        ps = coin.SoPickStyle()
+        ps.style = coin.SoPickStyle.UNPICKABLE
+        sep.addChild(ps)
+    po = coin.SoPolygonOffset()
+    po.factor, po.units = -1.0, -1.0
+    sep.addChild(po)
+    mat = coin.SoMaterial()
+    mat.diffuseColor = rgb(color)
+    mat.transparency = transparency
+    sep.addChild(mat)
+    pts, idx = [], []
+    for face in shape.Faces:
+        base = len(pts)
+        fp, tris = face.tessellate(max(face.BoundBox.DiagonalLength / 80.0, 0.05))
+        pts += fp
+        for t in tris:
+            idx += [base + t[0], base + t[1], base + t[2], -1]
+    if not pts:
+        return sep
+    crd = coin.SoCoordinate3()
+    crd.point.setValues(0, len(pts), [[p.x, p.y, p.z] for p in pts])
+    fs = coin.SoIndexedFaceSet()
+    fs.coordIndex.setValues(0, len(idx), idx)
+    sep.addChild(crd)
+    sep.addChild(fs)
+    return sep
+
+
+def arrow_node(origin, tip, color, px, lead=0.0):
+    """A solid shaft from origin to tip with a cone at the tip, drawn on top of the model. Only
+    the length follows the value: shaft and head widths are fixed in screen size (px = world
+    size of one pixel), so a short value still gives a full-size, easy-to-grab arrow. lead
+    starts the shaft that much further back, for an arrow coming in from outside a part."""
     coin = _coin()
     sep = coin.SoAnnotation()
-    mat = coin.SoBaseColor()
-    mat.rgb = rgb(color)
+    mat = coin.SoMaterial()                 # lit, but glowing: reads as the accent colour from any side
+    c = rgb(color)
+    mat.diffuseColor = c
+    mat.emissiveColor = tuple(x * 0.65 for x in c)
     sep.addChild(mat)
-    style = coin.SoDrawStyle()
-    style.lineWidth = 3
-    sep.addChild(style)
-    crd = coin.SoCoordinate3()
-    crd.point.setValues(0, 2, [[origin.x, origin.y, origin.z], [tip.x, tip.y, tip.z]])
-    sep.addChild(crd)
-    sep.addChild(coin.SoLineSet())
     d = tip - origin
-    if d.Length > 1e-9:
+    if d.Length < 1e-9:
+        return sep
+    if lead > 0:
+        origin = origin - d.normalize() * lead
+        d = tip - origin
+    rot = App.Rotation(V(0, 1, 0), d)
+    head_r, head_h, shaft_r = 16 * px, 46 * px, 4 * px
+    shaft_len = max(d.Length - head_h, 0.0)
+    if shaft_len > 0:
+        mid = origin + d.normalize() * (shaft_len / 2)
+        shaft = coin.SoSeparator()
         tr = coin.SoTransform()
-        rot = App.Rotation(V(0, 1, 0), d)
-        tr.translation = (tip.x, tip.y, tip.z)
+        tr.translation = (mid.x, mid.y, mid.z)
         tr.rotation.setValue(*rot.Q)
-        cone_sep = coin.SoSeparator()
-        cone_sep.addChild(tr)
-        cone = coin.SoCone()
-        cone.bottomRadius, cone.height = radius, radius * 2.6
-        cone_sep.addChild(cone)
-        sep.addChild(cone_sep)
+        cyl = coin.SoCylinder()
+        cyl.radius, cyl.height = shaft_r, shaft_len
+        shaft.addChild(tr)
+        shaft.addChild(cyl)
+        sep.addChild(shaft)
+    base = origin + d.normalize() * shaft_len
+    centre = base + d.normalize() * (min(head_h, d.Length) / 2)
+    head = coin.SoSeparator()
+    tr = coin.SoTransform()
+    tr.translation = (centre.x, centre.y, centre.z)
+    tr.rotation.setValue(*rot.Q)
+    cone = coin.SoCone()
+    cone.bottomRadius, cone.height = head_r, min(head_h, d.Length)
+    head.addChild(tr)
+    head.addChild(cone)
+    sep.addChild(head)
     return sep
 
 

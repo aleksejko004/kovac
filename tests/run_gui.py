@@ -3,6 +3,7 @@
 
     py tests/run_gui.py                  M1 acceptance (gui_acceptance.py)
     py tests/run_gui.py gui_m2.py        M2 end-to-end
+    KOVAC_SEGMENTS=move,offset py tests/run_gui.py gui_m2.py    only those segments of it
 (exit code 0 = all checks passed)
 """
 import io

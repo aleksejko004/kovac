@@ -61,16 +61,25 @@ def nearest(it, pos, points, radius):
     return best and best[1:]
 
 
-def face_snap(it, pos, p, face):
-    """Where a point picked on a flat face lands: one of the face's corners, circle centres or
-    its centre (within POINT_PX); else the grid in the face's plane at half the ground step
-    (when close); else exactly p. Returns (point, kind) with kind "point", "grid" or None.
-    Without a view (it is None) the old world-space rule applies: the centre within 0.3 steps."""
+def face_points(face):
+    """Candidate snap points on a flat face: its corners, straight-edge midpoints, circle
+    centres, and its own centre."""
     import Part
+    return ([v.Point for v in face.Vertexes] + [face.CenterOfMass]
+            + [e.Curve.Center for e in face.Edges if isinstance(e.Curve, Part.Circle)]
+            + [(e.Vertexes[0].Point + e.Vertexes[-1].Point) * 0.5 for e in face.Edges
+               if isinstance(e.Curve, Part.Line) and len(e.Vertexes) == 2])
+
+
+def face_snap(it, pos, p, face):
+    """Where a point picked on a flat face lands: one of face_points(face) (within POINT_PX);
+    else the grid in the face's plane at half the ground step (when close); else exactly p.
+    Returns (point, kind) with kind "point", "grid" or None. Without a view (it is None) the
+    old world-space rule applies: the centre within 0.3 steps."""
     s = step()
     n = face.normalAt(*face.Surface.parameter(p))
     origin = n * face.Surface.Position.dot(n)
-    points = [v.Point for v in face.Vertexes] + [face.CenterOfMass] +         [e.Curve.Center for e in face.Edges if isinstance(e.Curve, Part.Circle)]
+    points = face_points(face)
     grid_pts = []
     if s:
         q = _snap(p, origin, n, s / 2)      # ponytail: half the visible step, so 5 mm stays reachable on a 2 mm grid
@@ -108,18 +117,29 @@ def _skip_bounds_group():
 
 
 def _lines(root, polylines, width, pattern=0xFFFF):
-    """Polylines of [(point, hex colour), ...]; the colour blends along each one."""
+    """Polylines of [(point, hex colour[, alpha]), ...]; colour and opacity both blend along
+    each one. Real transparency, not a fade toward an approximate flat background colour: the
+    actual background is a top-to-bottom gradient (`palette.py`), so mixing toward one flat
+    averaged colour left a seam wherever the grid's own fade crossed a part of the screen the
+    average didn't match -- most visible at a shallow tilt, where the grid's fade band can span
+    much of the screen's own vertical gradient at once. SoMaterial (not SoBaseColor, which has
+    no alpha) with transparency bound PER_VERTEX alongside colour fades to nothing against
+    whatever is actually behind it."""
     from pivy import coin
     polylines = [pl for pl in polylines if len(pl) > 1]
     if not polylines:
         return
     sep = coin.SoSeparator()
-    pts = [q for pl in polylines for q, _ in pl]
-    cols = [tuple(c / 255.0 for c in palette.rgb(h)) for pl in polylines for _, h in pl]
-    col = coin.SoBaseColor()
-    col.rgb.setValues(0, len(cols), cols)
+    pts = [q for pl in polylines for q, *_ in pl]
+    cols = [tuple(c / 255.0 for c in palette.rgb(h)) for pl in polylines for _, h, *_ in pl]
+    alphas = [(a[0] if a else 1.0) for pl in polylines for _, h, *a in pl]
+    mat = coin.SoMaterial()
+    mat.diffuseColor.setValues(0, len(cols), cols)
+    mat.transparency.setValues(0, len(alphas), [1.0 - a for a in alphas])
     bind = coin.SoMaterialBinding()
     bind.value = coin.SoMaterialBinding.PER_VERTEX
+    light = coin.SoLightModel()
+    light.model = coin.SoLightModel.BASE_COLOR
     style = coin.SoDrawStyle()
     style.lineWidth = width
     style.linePattern = pattern
@@ -127,7 +147,7 @@ def _lines(root, polylines, width, pattern=0xFFFF):
     crd.point.setValues(0, len(pts), [list(q) for q in pts])
     lines = coin.SoLineSet()
     lines.numVertices.setValues(0, len(polylines), [len(pl) for pl in polylines])
-    for node in (col, bind, style, crd, lines):
+    for node in (mat, bind, light, style, crd, lines):
         sep.addChild(node)
     root.addChild(sep)
 
@@ -158,7 +178,6 @@ def _build(view, s, half, centre=(0.0, 0.0)):
     five steps and their letter; a short Z axis."""
     from pivy import coin
     t = palette.theme(kovac.theme_name())
-    bg = palette.mix(t["viewport_top"], t["viewport_bottom"], 0.5)
     outer = _skip_bounds_group()          # a plain group: keep our unlit, unpickable state inside a separator
     root = coin.SoSeparator()
     outer.addChild(root)
@@ -172,17 +191,26 @@ def _build(view, s, half, centre=(0.0, 0.0)):
     light = coin.SoLightModel()
     light.model = coin.SoLightModel.BASE_COLOR
     root.addChild(light)
+    blend = coin.SoTransparencyType()     # blend in place: the default delays see-through shapes to a
+    blend.value = coin.SoTransparencyType.BLEND   # sorted pass that drops the grid (no bounding box)
+    root.addChild(blend)
 
     def shade(colour, x, y):
+        """(colour, opacity): real transparency, faded to nothing by the edge, not a fade
+        toward an approximate flat background -- the viewport is a top-to-bottom gradient
+        (`palette.py`), and a fade toward one flat averaged colour left a visible seam
+        wherever its own gradient didn't match that average, most noticeable at a shallow
+        tilt where the fade band can span much of the screen's own gradient at once."""
         r = max(abs(x - cx), abs(y - cy)) / half
-        return palette.mix(bg, colour, min(1.0, max(0.0, (1 - r) / (1 - FADE))))
+        return colour, min(1.0, max(0.0, (1 - r) / (1 - FADE)))
 
     def faded(colour, a, b, steps=(0.0, FADE, 1.0)):
         """Polyline from a to b with the fade applied at each stop."""
         out = []
         for k in steps:
             q = tuple(x + (y - x) * k for x, y in zip(a, b))
-            out.append((q, shade(colour, q[0], q[1])))
+            c, alpha = shade(colour, q[0], q[1])
+            out.append((q, c, alpha))
         return out
     n = int(round(half / s))
     i0, j0 = int(round(cx / s)), int(round(cy / s))
@@ -213,7 +241,7 @@ def _build(view, s, half, centre=(0.0, 0.0)):
         on_axis = lambda u: tuple(u * k for k in d)  # noqa: E731
 
         def seg(u0, u1):
-            return [(on_axis(u), shade(col, *on_axis(u)[:2])) for u in (u0, (u0 + u1) / 2, u1)] if u1 > u0 else []
+            return [(on_axis(u), *shade(col, *on_axis(u)[:2])) for u in (u0, (u0 + u1) / 2, u1)] if u1 > u0 else []
         _lines(root, [seg(max(lo, 0), hi)], 2.4)                       # positive side solid
         _lines(root, [seg(lo, min(hi, 0))], 1.6, 0x0F0F)              # negative side dashed
         ticks = []
@@ -247,6 +275,7 @@ def refresh(force=False):
         _sketch_grid(Gui.ActiveDocument.getInEdit(), s)
     if not enabled() or editing:            # a sketch draws its own grid
         remove()
+        _clip_for(it, None, 0)          # still ours: Coin's own clipping slices a model the camera sits in
         _state["step"] = s
         return
     # the grid follows the view: centred under it, big enough to fill it, so it never runs out
@@ -255,6 +284,7 @@ def refresh(force=False):
     reach = max(it.vp.width(), it.vp.height()) * it.px_size()
     half = max(s * 30, reach * 1.6)
     half = min(math.ceil(half / (5 * s)) * 5 * s, s * 400)
+    _clip_for(it, c, half)             # every tick: the grid reaches past what auto-clip would allow
     moved = _state.get("centre") is None or max(abs(c[0] - _state["centre"][0]), abs(c[1] - _state["centre"][1])) > half * 0.2
     if not force and s == _state["step"] and _state["node"] is not None and _state["view"] is view and not moved:
         return
@@ -264,13 +294,75 @@ def refresh(force=False):
     _state["step"], _state["view"], _state["centre"] = s, view, c
 
 
+def _corners(box):
+    return [V(x, y, z) for x in (box.XMin, box.XMax) for y in (box.YMin, box.YMax) for z in (box.ZMin, box.ZMax)]
+
+
+def _clip_for(it, centre, half):
+    """Near and far clip planes that take in both the model and the grid.
+
+    The grid sits in a SoSkipBoundingGroup (EXCLUDE_BBOX) so 'fit all' never zooms out to show
+    it -- but Coin's automatic clipping walks the same scene bounding box, so it never saw the
+    grid and cut it off wherever the clip planes crossed the ground. We take over clipping
+    (grid on or off, in sketches too): auto-clipping off, planes set each tick from the depth
+    of every model and grid bounding-box corner along the camera's view direction.
+
+    Depth along the view, not distance: an earlier version used one bounding sphere, and a
+    far grid corner inflated its radius until the near plane passed the model and sliced it.
+    With depths, more corners can only widen the range -- the near plane moves closer, never
+    past anything. Sizing near from the model alone, as a later version did, cut away the half
+    of the grid between the camera and an empty or small model."""
+    from pivy import coin
+    from kovac import navigation
+    view = it.view
+    rm = view.getViewer().getSoRenderManager()
+    rm.setAutoClipping(coin.SoRenderManager.NO_AUTO_CLIPPING)
+    cam = view.getCameraNode()
+    pos = V(*cam.position.getValue().getValue())
+    forward = navigation.camera_focus(cam) - pos
+    forward = forward.normalize() if forward.Length > 1e-9 else V(0, 0, -1)
+    model_box = App.BoundBox()     # everything drawn (overlays, arrows, plane picker too), minus the grid itself
+    bba = coin.SoGetBoundingBoxAction(rm.getViewportRegion())
+    bba.apply(view.getSceneGraph())
+    sb = bba.getBoundingBox()
+    if not sb.isEmpty():
+        model_box.add(V(*sb.getMin().getValue()))
+        model_box.add(V(*sb.getMax().getValue()))
+    grid_corners = []
+    if centre is not None:
+        cx, cy = centre
+        grid_corners = [V(x, y, 0) for x in (cx - half, cx + half) for y in (cy - half, cy + half)]
+    model_corners = _corners(model_box) if model_box.isValid() else [pos + forward]
+    depths = [(c - pos).dot(forward) for c in model_corners + grid_corners]
+    near, far = min(depths), max(depths)       # depth along the view, not a sphere: the grid's corners can only pull near closer
+    model_size = model_box.DiagonalLength if model_box.isValid() else 0.0
+    margin = max(model_size, half) * 0.02 + 1e-3    # a hair of slack either side
+    near, far = near - margin, far + margin
+    if not cam.getTypeId().isDerivedFrom(coin.SoOrthographicCamera.getClassTypeId()):
+        near = max(near, 1e-3)
+    # An orthographic camera may sit inside the model (fit-all leaves it at the model's edge
+    # and orbiting swings it through); its projection has no eye point, so a negative near
+    # plane is valid and keeps whatever lies behind the camera position drawn, not sliced off.
+    if far <= near:
+        far = near + 1.0
+    cam.nearDistance.setValue(near)
+    cam.farDistance.setValue(far)
+
+
 def _ground_centre(it):
-    """Point of the ground (z = 0) under the middle of the view; the focal point if the view is edge-on."""
+    """Point of the ground (z = 0) under the middle of the view; the camera's look-at point if
+    the view is edge-on. Near a grazing angle the ray-ground intersection runs arbitrarily far
+    away (dividing by a near-zero d.z), which used to carry the whole grid off screen with it
+    -- the camera's own focus point stays close to the model at any tilt, so the grid never
+    drifts out of view just because the view angle got shallow."""
     from kovac import overlay
     from PySide import QtCore
     o, d = overlay.ray(it, QtCore.QPoint(it.vp.width() // 2, it.vp.height() // 2))
     p = overlay.hit_plane(o, d, V(0, 0, 0), V(0, 0, 1)) if abs(d.z) > 0.05 else None
-    return p if p is not None else o
+    if p is not None:
+        return p
+    from kovac import navigation
+    return navigation.camera_focus(it.camera())
 
 
 def remove():
@@ -316,12 +408,17 @@ def _sketch_grid(vo, s):
 
 
 def _points(sk):
-    """Points worth landing on: ends of lines and arcs, centres, free points, the origin."""
+    """Points worth landing on: ends of lines and arcs, their midpoints, centres, free points,
+    the origin. A curve's midpoint here is the midpoint of its two endpoints (what Midpoint
+    constrains to), not a point on the curve itself -- the same thing for a line, the chord's
+    middle for an arc."""
     out = [V(0, 0, 0)]
     for g in sk.Geometry:
         for attr in ("StartPoint", "EndPoint", "Center"):
             if hasattr(g, attr):
                 out.append(getattr(g, attr))
+        if hasattr(g, "StartPoint") and hasattr(g, "EndPoint"):
+            out.append((g.StartPoint + g.EndPoint) * 0.5)
         if g.TypeId == "Part::GeomPoint":
             out.append(V(g.X, g.Y, g.Z))
     return out

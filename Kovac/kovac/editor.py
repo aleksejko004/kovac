@@ -66,17 +66,20 @@ SCHEMAS = {
     "Draft": [("picks", "Faces", "Faces", ("Face",)), ("pick", "Neutral", "Neutral face", ("Face",)),
               ("value", "Angle", "Angle"), ("bool", "Reverse", "Reverse pull")],
     "FacePull": [("pick", "Face", "Face", ("Face",)), ("value", "Distance", "Distance")],
+    "MoveFace": [("movetype",), ("pick", "Face", "Face", ("Face",)), ("move", "Move", "Move by")],
     "DeleteFace": [("picks", "Faces", "Faces", ("Face",))],
     "Combine": [("body", "Target", "Target body"), ("bodies", "Tools", "Tool bodies"), ("enum", "Operation", "Operation"),
                 ("bool", "KeepTools", "Keep tools")],
     "SplitBody": [("body", "Body", "Body"), ("plane", "Plane", "Split with")],
-    "Move": [("bodies", "Bodies", "Bodies"), ("move", "Move", "Move by"), ("bool", "Copy", "Copy")],
+    "Move": [("movetype",), ("bodies", "Bodies", "Bodies"), ("move", "Move", "Move by"), ("bool", "Copy", "Copy")],
     "Scale": [("bodies", "Bodies", "Bodies"), ("float", "Factor", "Factor"), ("vector", "Center", "About point")],
     "Mirror": [("bodies", "Bodies", "Bodies"), ("plane", "Plane", "Mirror plane"), ("bool", "Join", "Join with the original")],
     "Pattern": [("features", "Sources", "Features"), ("bodies", "Bodies", "or bodies"), ("enum", "Type", "Type"),
                 ("vector", "Direction1", "Direction 1"), ("int", "Count1", "Count 1"), ("value", "Spacing1", "Spacing 1"),
                 ("vector", "Direction2", "Direction 2"), ("int", "Count2", "Count 2"), ("value", "Spacing2", "Spacing 2"),
                 ("axis", "Axis", "Axis"), ("int", "Count", "Count"), ("value", "TotalAngle", "Total angle"),
+                ("sketch", "Path", "Path"), ("picks", "PathEdges", "or path edges", ("Edge",)),
+                ("bool", "Align", "Follow the path"),
                 ("skip", "Skip", "Skipped (click instances)")],
     "RemoveBody": [("bodies", "Bodies", "Bodies")],
     "Thread": [("picks", "Faces", "Cylindrical faces", ("Face",)), ("text", "Size", "Size"), ("value", "Length", "Length")],
@@ -89,10 +92,13 @@ SCHEMAS = {
 
 # option values shown as icon buttons instead of a drop-down (all values of a property must be here)
 CHOICE_ICONS = {
+    "Rigid": "j_rigid", "Revolute": "j_revolute", "Slider": "j_slider", "Cylindrical": "j_cylindrical",
+    "Ball": "j_ball", "Planar": "j_planar",
     "Distance": "ext_distance", "To face": "ext_toface", "Through all": "ext_through",
     "One side": "side_one", "Two sides": "side_two", "Symmetric": "side_symmetric",
     "Auto": "op_auto", "Join": "op_join", "Cut": "op_cut", "Intersect": "op_intersect", "New body": "op_newbody",
     "Simple": "hole_simple", "Counterbore": "hole_counterbore", "Countersink": "hole_countersink", "Tapped": "hole_tapped",
+    "Round corners": "offset_round", "Sharp corners": "offset_sharp",
     "Box": "box", "Cylinder": "cylinder", "Sphere": "sphere", "Cone": "cone", "Torus": "torus",
 }
 
@@ -142,6 +148,22 @@ def _choice(fp, prop):
 
 def _kind(fp):
     return fp.Kind if getattr(fp, "Kind", "") in SCHEMAS else type(fp.Proxy).kind
+
+
+class DoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    """A QDoubleSpinBox that takes '.' or ',' as the decimal point while typing, regardless of
+    which one the locale actually uses -- plain Qt only accepts that one and silently drops
+    the other as a stray character (typing "3.5" under a comma locale becomes 35)."""
+
+    def _other(self):
+        return "," if self.locale().decimalPoint() == "." else "."
+
+    def validate(self, text, pos):
+        state, _, p = super().validate(text.replace(self._other(), self.locale().decimalPoint()), pos)
+        return state, text, p            # keep what was actually typed on screen
+
+    def valueFromText(self, text):
+        return super().valueFromText(text.replace(self._other(), self.locale().decimalPoint()))
 
 
 # ---------------------------------------------------------------- value field
@@ -291,6 +313,9 @@ class ObjectRow(_Row):
 
     def resolve(self, obj, sub):
         if self.what in ("sketch", "sketches"):
+            from kovac import curve3d
+            if self.prop == "Path" and curve3d.is_curve(obj):      # a path may leave the plane
+                return obj
             return obj if obj.TypeId.startswith("Sketcher::") else None
         if self.what in ("body", "bodies"):
             return obj.BodyId if type(getattr(obj, "Proxy", None)).__name__ == "BodyProxy" else None
@@ -333,7 +358,8 @@ class PlaneRow(_Row):
             type(getattr(obj, "Proxy", None)).__name__ == "DatumPlane"
 
     def take(self, obj, sub, pnt):
-        setattr(self.ed.fp, self.prop, obj.Name if not sub else model.pick_ref(obj, sub))
+        datum = type(getattr(obj, "Proxy", None)).__name__ == "DatumPlane"   # clicked in the view it comes as "Face1"
+        setattr(self.ed.fp, self.prop, obj.Name if datum or not sub else model.pick_ref(obj, sub))
         self.combo.blockSignals(True)
         self.combo.setCurrentIndex(3)
         self.combo.blockSignals(False)
@@ -453,6 +479,8 @@ class PositionsRow(_ViewportPoints, _Row):
             return
         hit = self.landing(obj, sub, pnt)
         p = hit[0] if hit else App.Vector(*pnt)
+        from kovac import components
+        p = components.path_frame(obj, sub).inverse().multVec(p)      # into the body's own coordinates
         setattr(self.ed.fp, self.prop, list(getattr(self.ed.fp, self.prop)) + [p])
         self.refresh()
 
@@ -532,6 +560,14 @@ class Editor(QtWidgets.QWidget):
             box.addWidget(self.op_label)
             form.addRow("Result", box)
             return
+        if kind == "movetype":           # Move: what the triad moves -- whole bodies or one face
+            from kovac import move
+            combo = QtWidgets.QComboBox(objectName="kovacMoveType")
+            combo.addItems(move.TYPES)
+            combo.setCurrentText(move.type_of(fp))
+            combo.currentTextChanged.connect(lambda t: QtCore.QTimer.singleShot(0, lambda: move.switch(self, t)))
+            form.addRow("Move", combo)
+            return
         if kind == "groups":
             b = QtWidgets.QPushButton("Add a group with its own size")
             b.clicked.connect(self.add_group)
@@ -550,7 +586,7 @@ class Editor(QtWidgets.QWidget):
             form.addRow(label, w)
             self.fields = getattr(self, "fields", []) + [(prop, w)]
         elif kind in ("int", "float"):
-            w = QtWidgets.QSpinBox() if kind == "int" else QtWidgets.QDoubleSpinBox()
+            w = QtWidgets.QSpinBox() if kind == "int" else DoubleSpinBox()
             w.setRange(1 if kind == "int" else 1e-6, 10000 if kind == "int" else 1e6)
             if kind == "float":
                 w.setDecimals(4)
@@ -573,7 +609,7 @@ class Editor(QtWidgets.QWidget):
         elif kind == "vector":
             box, spins = QtWidgets.QHBoxLayout(), []
             for i, c in enumerate("xyz"):
-                s = QtWidgets.QDoubleSpinBox()
+                s = DoubleSpinBox()
                 s.setRange(-1e6, 1e6)
                 s.setDecimals(3)
                 s.setValue(getattr(fp, prop)[i])
@@ -584,19 +620,9 @@ class Editor(QtWidgets.QWidget):
                 s.valueChanged.connect(lambda _v, p=prop, sp=spins: self.set(p, App.Vector(*[x.value() for x in sp])))
             form.addRow(label, box)
         elif kind == "move":
-            box, spins = QtWidgets.QHBoxLayout(), []
-            pl = getattr(fp, prop)
-            for c, v in zip(("x", "y", "z", "rot Z°"), (pl.Base.x, pl.Base.y, pl.Base.z, pl.Rotation.Angle * 57.29577951308232)):
-                s = QtWidgets.QDoubleSpinBox()
-                s.setRange(-1e6, 1e6)
-                s.setPrefix(c + " ")
-                s.setValue(v)
-                spins.append(s)
-                box.addWidget(s)
-            for s in spins:
-                s.valueChanged.connect(lambda _v, p=prop, sp=spins: self.set(
-                    p, App.Placement(App.Vector(sp[0].value(), sp[1].value(), sp[2].value()), App.Rotation(App.Vector(0, 0, 1), sp[3].value()))))
-            form.addRow(label, box)
+            row = MoveRow(self, prop)
+            self.fields = getattr(self, "fields", []) + [(prop, row)]
+            form.addRow(label, row)
         elif kind == "place":
             hint = QtWidgets.QLabel("<i>click a face to place it there</i>")
             row = PlaceRow(self, prop, hint)
@@ -673,7 +699,10 @@ class Editor(QtWidgets.QWidget):
         self.changed()
 
     def changed(self):
-        self.timer.start()
+        # a steady stream of changes (an arrow being dragged) previews every 60 ms as it goes,
+        # rather than only once the mouse stops
+        if not self.timer.isActive():
+            self.timer.start()
 
     def preview(self):
         model.commit(self.doc)
@@ -724,6 +753,7 @@ class Editor(QtWidgets.QWidget):
 
     def close_panel(self):
         global _current
+        self.closing = True
         Gui.Selection.removeObserver(self)
         for r in self.rows:
             if isinstance(r, QtGui.QShortcut):
@@ -751,6 +781,12 @@ class Editor(QtWidgets.QWidget):
             return
         self.hide_consumed()
         model.commit(self.doc)
+        if self.new and self.fp.Status:
+            # a brand new feature that failed outright has nothing worth keeping -- same as
+            # Cancel, not left behind broken. An *edit* that breaks a feature still commits
+            # (reject() below): it's not new, and the history after it may depend on its tip.
+            self.reject()
+            return
         if self.doc.HasPendingTransaction:
             self.doc.commitTransaction()
         self.close_panel()
@@ -776,6 +812,39 @@ class Editor(QtWidgets.QWidget):
         model.commit(self.doc)
 
 
+class MoveRow(QtWidgets.QWidget):
+    """Move by: an offset x, y, z and a turn about X, Y, Z (degrees, about the bodies' centre);
+    kept in step with the on-canvas triad."""
+
+    def __init__(self, ed, prop):
+        super().__init__()
+        self.ed, self.prop = ed, prop
+        grid = QtWidgets.QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.spins = []
+        for k, name in enumerate(("x", "y", "z", "turn X°", "turn Y°", "turn Z°")):
+            sp = DoubleSpinBox()
+            sp.setRange(-1e6, 1e6)
+            sp.setDecimals(2 if k < 3 else 1)
+            sp.setPrefix(name + " ")
+            sp.valueChanged.connect(self.push)
+            self.spins.append(sp)
+            grid.addWidget(sp, k // 3, k % 3)
+        self.show_value()
+
+    def show_value(self):
+        pl = getattr(self.ed.fp, self.prop)
+        yaw, pitch, roll = pl.Rotation.toEuler()
+        for sp, v in zip(self.spins, (pl.Base.x, pl.Base.y, pl.Base.z, roll, pitch, yaw)):
+            sp.blockSignals(True)
+            sp.setValue(v)
+            sp.blockSignals(False)
+
+    def push(self, *_):
+        v = [sp.value() for sp in self.spins]
+        self.ed.set(self.prop, App.Placement(App.Vector(*v[:3]), App.Rotation(v[5], v[4], v[3])))
+
+
 class PlaceRow(_ViewportPoints, _Row):
     """Primitive placement: click a face; the shape sits on it at the clicked point."""
 
@@ -792,7 +861,14 @@ class PlaceRow(_ViewportPoints, _Row):
         if not isinstance(f.Surface, Part.Plane):
             return
         p, n, _ = self.landing(obj, sub, pnt or tuple(f.CenterOfMass))
-        setattr(self.ed.fp, self.prop, datum.frame(p, n))
+        from kovac import components
+        if components.root(obj.Document) is not None:   # the new body joins the clicked body's component
+            leaf, _el = components.resolve(obj, sub)
+            comp = components.holder(leaf)
+            self.ed.fp.Home = comp.Name if comp is not None else ""
+            setattr(self.ed.fp, self.prop, components.path_frame(obj, sub).inverse().multiply(datum.frame(p, n)))
+        else:
+            setattr(self.ed.fp, self.prop, datum.frame(p, n))
         self.label.setText("on %s" % obj.Label)
 
 
@@ -803,17 +879,42 @@ def point_input():
     return row if isinstance(row, _ViewportPoints) else None
 
 
+def close_current():
+    """Close whatever panel is already open (OK if it was editing, Cancel if it was new),
+    before starting or opening another one. Must run before a new transaction is opened or a
+    new feature created: start()/edit() used to do this *after*, inside open_editor() -- late
+    enough that Cancelling the panel just opened could abort the transaction the previous
+    command's own feature was created under, deleting it out from under its own panel (a
+    ReferenceError on fp.Document, since nothing closed the first panel first)."""
+    from kovac import curve3d
+    curve3d.finish()
+    if _current is not None:
+        _current.reject() if _current.new else _current.accept()
+
+
+class _CloseIsCancel(QtCore.QObject):
+    """The panel window's own close button means Cancel, not "leave the feature half-made"."""
+
+    def __init__(self, ed, parent):
+        super().__init__(parent)
+        self.ed = ed
+
+    def eventFilter(self, _o, ev):
+        if ev.type() == QtCore.QEvent.Close and not getattr(self.ed, "closing", False):
+            QtCore.QTimer.singleShot(0, self.ed.reject)
+        return False
+
+
 def open_editor(fp, new):
     """Show the panel for fp (inside a transaction the caller opened)."""
     global _current
-    if _current is not None:
-        _current.reject() if _current.new else _current.accept()
     from kovac import panel
     ed = Editor(fp, new)
     title = ("New " if new else "Edit ") + fp.Label
     d = panel.dock("Editor", title, ed, floating=True)
     d.setWindowTitle(title)
     d.setWidget(ed)
+    d.installEventFilter(_CloseIsCancel(ed, d))
     d.show()
     d.raise_()
     _current = ed
@@ -823,26 +924,39 @@ def open_editor(fp, new):
     return ed
 
 
+def _open_transaction(doc, name):
+    """The panel's own undo step, kept open until OK or Cancel. FreeCAD runs every toolbar
+    click and shortcut inside an automatic transaction that it commits as the command returns;
+    a plain openTransaction() inside that only renames it, so the panel's step was committed
+    the moment the panel opened and Cancel had nothing left to undo -- the feature stayed. The
+    second call, now that the step carries our name, asks for it to persist past the command
+    (outside a command it simply opens a fresh, still-empty step: nothing has changed yet)."""
+    for _ in range(2):
+        App.setActiveTransaction(name, True)
+
+
 def start(proxy, name=None, **props):
     """Create a feature at the rollback marker and open its panel (one transaction)."""
+    close_current()
     doc = App.ActiveDocument
     if doc is None:
         from kovac import startpage
         doc = startpage.new_design()
-    doc.openTransaction(proxy.kind)
+    _open_transaction(doc, proxy.kind)
     fp = model.create(doc, proxy, name, **props)
     return open_editor(fp, True)
 
 
 def edit(fp):
     """Edit a history feature: the model rolls back to it while the panel is open."""
+    close_current()
     doc = fp.Document
     before = model.rollback_index(doc)
     its = model.items(doc)
     if fp in its and its.index(fp) + 1 < before:
         model.set_rollback(doc, its.index(fp) + 1)
         model.commit(doc)
-    doc.openTransaction("Edit " + fp.Label)
+    _open_transaction(doc, "Edit " + fp.Label)
     ed = open_editor(fp, False)
     ed.rollback_before = before if fp in its and its.index(fp) + 1 < before else None
     return ed
