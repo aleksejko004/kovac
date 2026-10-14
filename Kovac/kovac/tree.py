@@ -25,6 +25,8 @@ def role(obj):
     """What the user sees an object as: component, body, sketch, reference, joint, analysis,
     feature (timeline only) or machinery (never shown)."""
     proxy = type(getattr(obj, "Proxy", None)).__name__
+    if proxy == "LinkedCopy":
+        return "linked"                              # a linked copy of a body (ADR-0005)
     if proxy == "BodyProxy":
         return "body" if not obj.Shape.isNull() else "machinery"
     if proxy == "HistoryProxy":
@@ -104,7 +106,7 @@ def item_icon(obj):
     if r == "reference":
         kind = type(getattr(obj, "Proxy", None)).__name__
         return kovac.icon({"DatumAxis": "axis", "DatumPoint": "point"}.get(kind, "plane"))
-    if r == "component" and obj.TypeId == "App::Link":
+    if r == "linked" or (r == "component" and obj.TypeId == "App::Link"):
         return kovac.icon("instance")
     if r == "joint":
         if hasattr(obj, "ObjectToGround"):
@@ -223,7 +225,7 @@ def create():
                     it.setToolTip(0, "Active component: new geometry goes here")
                 self.fill(it, doc, c)
             for r, title in FOLDERS:
-                members = [o for o in objs if role(o) == r]
+                members = [o for o in objs if role(o) == r or (r == "body" and role(o) == "linked")]  # copies by their bodies
                 if not members:
                     continue
                 folder = self.item(parent, "%s  (%d)" % (title, len(members)), icon=qicon("folder"),
@@ -316,6 +318,8 @@ def create():
                 if role(o) == "body":
                     m.addAction("Material…", lambda: commands.run("Kovac_Material"))
                     self.move_menu(m, o, sel)
+                if role(o) == "linked":
+                    m.addAction("Make independent", lambda: self.make_independent(o))
                 if len(sel) > 1 and o in sel:
                     m.addAction("Delete %d selected" % len(sel), self.delete_selected)
                 else:
@@ -337,6 +341,20 @@ def create():
                 a.setEnabled(here != {c})
             a = sub.addAction("Top of the design", lambda: self.run_move(bodies, None))
             a.setEnabled(here != {None})
+
+        def make_independent(self, link):
+            from kovac import copies, model
+            fp = link.Document.getObject(link.KovacCopyOf)
+            if fp is None:
+                return
+            try:
+                with commands.transaction("Make independent", link.Document):
+                    copies.make_independent(fp)
+                    model.commit(link.Document)
+                commands.report("%s: its copies are bodies of their own now." % fp.Label, error=False)
+            except Exception as e:
+                commands.report(e)
+            self.rebuild()
 
         def run_move(self, bodies, target):
             from kovac import assemble
@@ -379,6 +397,9 @@ def create():
                             note = components.remove(o)
                             if note:
                                 commands.report(note)
+                        elif role(o) == "linked":
+                            from kovac import copies
+                            copies.remove(o)
                         else:
                             doc.removeObject(o.Name)
             except Exception as e:

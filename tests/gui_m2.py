@@ -1472,8 +1472,82 @@ def seg_assembly():
           (before, after, Gui.getMainWindow().statusBar().currentMessage()))
 
 
+def seg_copies():
+    """Linked and independent copies: the panel's choice, the linked look, picks through a copy."""
+    from kovac import components, copies, editor, features, model, modify, sketchmode, views
+    doc = App.newDocument("CopiesTest")
+    yield 300
+    sk = sketchmode.create("XY", name="Block")
+    pts = [V(0, 0, 0), V(20, 0, 0), V(20, 10, 0), V(0, 10, 0)]
+    for i in range(4):
+        sk.addGeometry(Part.LineSegment(pts[i], pts[(i + 1) % 4]))
+    sketchmode.finish()
+    yield 300
+    ex = editor.start(features.Extrude, Profile=sk, Length=5)
+    ex.accept()
+    yield 300
+    block = bodies()[0]
+    ed = editor.start(modify.Pattern, Bodies=[block.BodyId], Count1=3, Spacing1=30)
+    yield 400
+    choice = next((w for w in ed.findChildren(editor.IconChoice) if "Linked" in w.buttons), None)
+    if choice is not None:
+        press(choice.buttons["Linked"])
+    yield 400
+    links = copies.links_of(ed.fp)
+    check("Pattern panel: choosing Linked shows the copies as links while the panel is open",
+          choice is not None and ed.fp.CopyMode == "Linked" and len(links) == 2, (choice is not None, ed.fp.CopyMode, len(links)))
+    ed.accept()
+    yield 400
+    pat = model.items(doc)[-1]
+    links = copies.links_of(pat)
+    tinted = all(lk.ViewObject.ShapeAppearance[0].DiffuseColor[:3] != block.ViewObject.ShapeAppearance[0].DiffuseColor[:3]
+                 for lk in links)
+    check("linked copies are drawn in the linked colour and are not bodies", len(links) == 2 and tinted and len(bodies()) == 1,
+          (len(links), tinted, len(bodies())))
+    Gui.Selection.clearSelection()
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 500
+    img = view().graphicsView().viewport().grab().toImage()
+    teal = 0
+    for lk in links:                                 # the middle of each copy's top face is tinted
+        x, y = view().getPointOnViewport(Part.getShape(lk).BoundBox.Center + V(0, 0, 2.5))
+        c = img.pixelColor(int(x), int(img.height() - y))         # both in device pixels
+        teal += c.green() > c.red() + 25
+    check("linked copies show in the linked (accent-tinted) colour", teal == len(links), teal)
+    shot("copies_tint")
+    br = Gui.getMainWindow().findChild(QtWidgets.QFrame, "kovacBrowser")
+    tw = br.findChild(QtWidgets.QTreeWidget) if br else None
+    labels = [it.text(0) for it in tw.findItems("", QtCore.Qt.MatchContains | QtCore.Qt.MatchRecursive)] if tw else []
+    check("the browser lists the linked copies", sum("(linked" in t for t in labels) == 2, labels[:10])
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 500
+    Gui.Selection.clearSelection()
+    click_at(V(70, 5, 5))                             # the top of the second copy
+    yield 300
+    sel = components.selected()
+    check("a click on a linked copy picks the original body",
+          bool(sel) and sel[0][0] == block and model.pick_ref(sel[0][2], sel[0][3]) is not None,
+          [(s[0].Name, s[1], s[2].Name, s[3]) for s in sel])
+    shot("copies_linked")
+    ex.fp.Length = 12
+    model.commit(doc)
+    yield 400
+    check("changing the original changes every linked copy",
+          all(abs(Part.getShape(lk).BoundBox.ZLength - 12) < 1e-6 for lk in copies.links_of(pat)),
+          [Part.getShape(lk).BoundBox.ZLength for lk in copies.links_of(pat)])
+    tw.make_independent(copies.links_of(pat)[0]) if hasattr(tw, "make_independent") else None
+    yield 400
+    check("browser Make independent: the copies become bodies of their own",
+          not copies.links_of(pat) and len(bodies()) == 3 and pat.CopyMode == "Independent", (len(bodies()), pat.CopyMode))
+    ex.fp.Length = 5
+    model.commit(doc)
+    yield 300
+    check("an independent copy keeps its shape when the original changes",
+          sorted(round(b.Shape.BoundBox.ZLength) for b in bodies()) == [5, 12, 12], [b.Shape.BoundBox.ZLength for b in bodies()])
+
+
 SEGMENTS = [("bracket", seg_bracket), ("curve3d", seg_curve3d), ("move", seg_move), ("offset", seg_offset),
-            ("assembly", seg_assembly)]
+            ("assembly", seg_assembly), ("copies", seg_copies)]
 
 
 def scenario():

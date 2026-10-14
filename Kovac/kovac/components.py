@@ -146,6 +146,9 @@ def path_frame(top, sub):
     leaf, element = resolve(top, sub)
     path = (sub or "")[:len(sub or "") - len(element)]
     if not path:
+        if leaf is not top:                    # a linked copy: where the copy sits (a mirror left out)
+            from kovac import copies
+            return frame(top).multiply(copies.matrix_placement(top))
         return frame(leaf)
     return top.getSubObject(path, 3).multiply(leaf.Placement.inverse())
 
@@ -157,9 +160,16 @@ def resolve(obj, sub):
     element = sub.split(".")[-1]
     path = sub[:len(sub) - len(element)]
     if not path:
-        return obj, element
+        return _through_copy(obj), element
     leaf = obj.getSubObject(path, 1)
-    return (leaf if leaf is not None else obj), element
+    return _through_copy(leaf if leaf is not None else obj), element
+
+
+def _through_copy(o):
+    """A linked copy of a body (ADR-0005) stands for its original: a pick on it is a pick on that."""
+    if o is not None and type(getattr(o, "Proxy", None)).__name__ == "LinkedCopy" and o.Original is not None:
+        return o.Original
+    return o
 
 
 def selected():

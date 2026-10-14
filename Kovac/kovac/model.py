@@ -356,11 +356,16 @@ def sync_bodies(doc, prune=False):
 def commit(doc):
     """Recompute, create any bodies the history produced, recompute those (cheap if none);
     then joints follow today's geometry (ADR-0004). Returns what the joints reported."""
+    from kovac import copies, joints
     doc.recompute()
+    if copies.freeze(doc):                # independent copies: their snapshot (ADR-0005)
+        doc.recompute()
     sync_bodies(doc)
     relink(doc)
     doc.recompute()
-    from kovac import joints
+    if copies.sync_links(doc):            # linked copies: links that show the original
+        doc.recompute()
+        copies.style_fresh(doc)
     return joints.update(doc)
 
 
