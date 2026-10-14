@@ -305,6 +305,8 @@ def create():
                     if o.TypeId == "App::Part":
                         m.addAction("Activate", lambda: self.double(it, 0))
                     m.addAction("New instance", lambda: assemble.instance([o]))
+                    if o.TypeId == "App::Part":
+                        m.addAction("Copy", lambda: assemble.copy([o]))
                     m.addAction("Move…", lambda: assemble.move_component(o))
                     grounded = o in joints.grounded(o.Document)
                     m.addAction("Unground" if grounded else "Ground", lambda: assemble.ground([o], not grounded))
@@ -313,12 +315,36 @@ def create():
                     m.addAction("Edit joint…", lambda: assemble.edit_joint(o))
                 if role(o) == "body":
                     m.addAction("Material…", lambda: commands.run("Kovac_Material"))
+                    self.move_menu(m, o, sel)
                 if len(sel) > 1 and o in sel:
                     m.addAction("Delete %d selected" % len(sel), self.delete_selected)
                 else:
                     m.addAction("Delete", lambda: self.delete(o))
             m.addAction("Save current view…", self.save_view)
             m.exec(self.viewport().mapToGlobal(pos))
+
+        def move_menu(self, m, o, sel):
+            """The Move to submenu: the other components, or the top of the design; bodies keep their place."""
+            from kovac import assemble, components
+            bodies = [x for x in sel if role(x) == "body"] if o in sel else [o]
+            here = {components.holder(b) for b in bodies}
+            places = [c for c in components.all_components(o.Document) if c.TypeId == "App::Part"]
+            if not places:
+                return
+            sub = m.addMenu("Move to")
+            for c in places:
+                a = sub.addAction(c.Label, lambda c=c: self.run_move(bodies, c))
+                a.setEnabled(here != {c})
+            a = sub.addAction("Top of the design", lambda: self.run_move(bodies, None))
+            a.setEnabled(here != {None})
+
+        def run_move(self, bodies, target):
+            from kovac import assemble
+            try:
+                assemble.move_to(bodies, target)
+            except Exception as e:
+                commands.report(e)
+            self.rebuild()
 
         def keyPressEvent(self, ev):
             if ev.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):

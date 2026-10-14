@@ -44,7 +44,7 @@ then a stop for owner review.
 - Write ADR-0004 (component and joint model) with the measured results; add OndselSolver to
   `THIRD_PARTY.md` (bundled, no new download).
 
-### Step 1 — Components inside one design
+### Step 1 — Components inside one design — built, except dragging bodies between components in the browser (Move to menu instead)
 - **New Component**: empty, or from the selected bodies. Double-click makes it active (bold);
   new sketches and features go into the active component and work in its own coordinates.
 - Drag bodies between components in the browser; the history records it (one undo step).

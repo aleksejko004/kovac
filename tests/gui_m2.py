@@ -1243,8 +1243,11 @@ def seg_assembly():
     views.go(view(), views.view_rotation(views.ISO), fit=True)
     yield 400
     rim = V(15 + 5 * math.cos(math.radians(225)), 20 + 5 * math.sin(math.radians(225)), 10)   # the rim, facing the camera
-    mouse(QtCore.QEvent.MouseMove, to_qt(rim))
-    yield 200
+    for _ in range(10):                          # the view may still be settling after the turn: hover again
+        mouse(QtCore.QEvent.MouseMove, to_qt(rim))
+        yield 100
+        if tool is not None and tool.nodes:
+            break
     check("Joint: hovering the hole's rim shows a joint-origin marker", tool is not None and len(tool.nodes) >= 1,
           tool and len(tool.nodes))
     click_at(rim)
@@ -1392,6 +1395,38 @@ def seg_assembly():
     doc.undo()
     yield 400
     check("Undo removes the joint again", not joints.all_joints(doc), [o.Name for o in joints.all_joints(doc)])
+
+    # -- Copy, Move to (browser), deleting a moved component: bodies stay where they are shown --
+    def shown(b):
+        return b.Shape.transformed(components.frame(b).toMatrix()).BoundBox
+    pin_c.Placement = App.Placement(V(30, 0, 0), App.Rotation(V(0, 1, 0), 20))
+    model.commit(doc)
+    yield 200
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(pin_c)
+    command("Kovac_CopyComponent")
+    yield 400
+    copy_c = next((c for c in components.all_components(doc) if c.Label.startswith(pin_c.Label + " copy")), None)
+    copy_b = [o for o in (copy_c.Group if copy_c else []) if type(getattr(o, "Proxy", None)).__name__ == "BodyProxy"]
+    check("Copy Component: a new component beside the pin with a body of its own",
+          copy_c is not None and len(copy_b) == 1 and copy_b[0].BodyId != pin_b.BodyId and
+          abs(copy_b[0].Shape.Volume - pin_b.Shape.Volume) < 1e-6, (copy_c and copy_c.Label, len(copy_b)))
+    before = shown(plate_b)
+    tw.run_move([plate_b], pin_c) if hasattr(tw, "run_move") else None
+    yield 400
+    after = shown(plate_b)
+    check("browser Move to: the plate goes into the turned pin component and stays where it was",
+          components.holder(plate_b) == pin_c and all(abs(getattr(before, k) - getattr(after, k)) < 1e-5
+                                                       for k in ("XMin", "YMin", "ZMin", "XMax", "YMax", "ZMax")),
+          (components.holder(plate_b) and components.holder(plate_b).Label, before, after))
+    before = shown(plate_b)
+    tw.delete(pin_c)
+    yield 400
+    after = shown(plate_b)
+    check("deleting a moved component leaves its bodies where they are",
+          components.holder(plate_b) is None and all(abs(getattr(before, k) - getattr(after, k)) < 1e-5
+                                                     for k in ("XMin", "YMin", "ZMin", "XMax", "YMax", "ZMax")),
+          (before, after, Gui.getMainWindow().statusBar().currentMessage()))
 
 
 SEGMENTS = [("bracket", seg_bracket), ("curve3d", seg_curve3d), ("move", seg_move), ("offset", seg_offset),

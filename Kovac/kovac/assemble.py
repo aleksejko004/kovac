@@ -541,6 +541,31 @@ def instance(comps=None):
     return made
 
 
+def copy(comps=None):
+    doc = App.ActiveDocument
+    comps = comps or _selected_components()
+    if not comps:
+        raise ValueError("Select a component (or a body in one) to copy.")
+    with commands.transaction("Copy component", doc):
+        made = [components.copy_component(c) for c in comps]
+        model.commit(doc)
+    Gui.Selection.clearSelection()
+    for m in made:
+        Gui.Selection.addSelection(m)
+    return made
+
+
+def move_to(bodies, target):
+    """Bodies into component `target` (None: the top of the design), as one undo step."""
+    doc = bodies[0].Document
+    with commands.transaction("Move to %s" % (target.Label if target is not None else "the design"), doc):
+        steps = components.move_bodies(doc, bodies, target)
+        model.commit(doc)
+    if steps:
+        commands.report("%s: a history step keeps %s where %s." % (steps[0].Label, "them" if len(bodies) > 1 else "it",
+                                                                   "they are" if len(bodies) > 1 else "it is"), error=False)
+
+
 def ground(comps=None, on=True):
     doc = App.ActiveDocument
     comps = comps or _selected_components()
@@ -568,6 +593,8 @@ COMMANDS = [
      new_component, "new_component", "Shift+C"),
     ("Kovac_NewInstance", "New Instance", "Another instance of the selected component: edit one, all change",
      instance, "instance", ""),
+    ("Kovac_CopyComponent", "Copy Component", "An independent copy of the selected component, with bodies of its own",
+     copy, "copy_component", ""),
     ("Kovac_Joint", "Joint", "Connect two components: pick a point on each, then choose what motion is left",
      joint, "joint", "Shift+J"),
     ("Kovac_DragComponent", "Drag", "Pull jointed parts: they move only as their joints allow (Esc ends)",

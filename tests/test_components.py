@@ -136,6 +136,73 @@ class Components(unittest.TestCase):
         model.commit(self.doc)
         self.assertEqual(ex.Status, "")
 
+    def shown(self, body):
+        """Where a body is on screen: its shape in its component's coordinates, placed."""
+        return body.Shape.transformed(components.frame(body).toMatrix()).BoundBox
+
+    def same_box(self, a, b):
+        for k in ("XMin", "YMin", "ZMin", "XMax", "YMax", "ZMax"):
+            self.assertAlmostEqual(getattr(a, k), getattr(b, k), 5, k)
+
+    def test_body_moved_into_another_component_stays_where_it_is_shown(self):
+        plate = self.plate()
+        pin = self.pin()
+        comp = components.new_component(self.doc, [pin], "Pin")
+        comp.Placement = App.Placement(V(0, 0, 50), App.Rotation(V(1, 0, 0), 90))
+        model.commit(self.doc)
+        before = self.shown(plate)
+        components.move_bodies(self.doc, [plate], comp)
+        model.commit(self.doc)
+        self.assertEqual(components.holder(plate), comp)
+        self.same_box(self.shown(plate), before)
+        moves = [o for o in model.items(self.doc) if type(getattr(o, "Proxy", None)).__name__ == "Transform"]
+        self.assertEqual(len(moves), 1)                                  # one history step carries the change
+        self.assertEqual(self.doc.getObject("PlateSketch").getParentGeoFeatureGroup(), None)   # sketches stay put
+        ex = [o for o in model.items(self.doc) if getattr(o, "Profile", None) == self.doc.getObject("PlateSketch")][0]
+        ex.Length = 20                                                   # an upstream edit still flows through
+        model.commit(self.doc)
+        self.assertAlmostEqual(self.shown(plate).ZLength, 20, 5)
+
+    def test_body_into_an_unmoved_component_needs_no_history_step(self):
+        plate = self.plate()
+        comp = components.new_component(self.doc, [], "Empty")
+        components.move_bodies(self.doc, [plate], comp)
+        self.assertEqual(components.holder(plate), comp)
+        self.assertFalse(any(type(getattr(o, "Proxy", None)).__name__ == "Transform" for o in model.items(self.doc)))
+
+    def test_deleting_a_moved_component_keeps_its_bodies_in_place(self):
+        self.plate()
+        pin = self.pin()
+        comp = components.new_component(self.doc, [pin], "Pin")
+        comp.Placement = App.Placement(V(10, 0, 50), App.Rotation(V(0, 1, 0), 30))
+        model.commit(self.doc)
+        before = self.shown(pin)
+        note = components.remove(comp)
+        model.commit(self.doc)
+        self.assertIn("sketches go back", note)                         # the pin's sketch was in it
+        self.assertIsNone(components.holder(pin))
+        self.same_box(self.shown(pin), before)
+
+    def test_copy_is_a_separate_component_with_its_own_bodies(self):
+        self.plate()
+        pin = self.pin()
+        comp = components.new_component(self.doc, [pin], "Pin")
+        comp.Placement = App.Placement(V(0, 0, 50), App.Rotation())
+        copy = components.copy_component(comp)
+        model.commit(self.doc)
+        new = [b for b in live_bodies(self.doc) if components.holder(b) == copy]
+        self.assertEqual(len(new), 1)
+        self.assertNotEqual(new[0].BodyId, pin.BodyId)
+        self.assertEqual(copy.Label, "Pin copy")
+        self.assertFalse(copy.Placement.isSame(comp.Placement, 1e-6))    # placed beside it
+        self.assertAlmostEqual(new[0].Shape.Volume, pin.Shape.Volume, 6)
+        rim = "Edge%d" % (1 + next(i for i, e in enumerate(new[0].Shape.Edges) if e.BoundBox.ZMin > 29))
+        feature(self.doc, modify.Chamfer, Edges=[topo.dumps(topo.make_ref(model.state_of(new[0].Tip), new[0].BodyId, rim))],
+                Distance=1)
+        model.commit(self.doc)
+        self.assertLess(new[0].Shape.Volume, pin.Shape.Volume - 1e-3)    # the copy changed alone
+        self.assertAlmostEqual(pin.Shape.Volume, 3.141592653589793 * 4.5 ** 2 * 30, 4)
+
     def test_save_and_reopen(self):
         self.plate()
         pin = self.pin()

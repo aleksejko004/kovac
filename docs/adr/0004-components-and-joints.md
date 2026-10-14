@@ -133,6 +133,10 @@ Writing all joint origins from references takes about 1.3 ms per joint, once per
   place, the solve check, ground and drag.
 - `assemble.py`: the Assemble ribbon group (New Component, New Instance, Joint, Drag, Ground).
 - `move.py`: Move with "Components".
+- Moving bodies between components (`components.move_bodies`, browser "Move to"): a Move step
+  by the fixed difference between the two components' placements keeps them where they are
+  shown; deleting a moved component uses the same step. Copy Component (`copy_component`): a
+  history step that copies the bodies into a new component.
 - Tests: `tests/test_components.py` (16 headless tests) and GUI segment `assembly`.
 
 Deviations from the decision above:
@@ -140,5 +144,10 @@ Deviations from the decision above:
   are listed in the browser. Making them timeline items needs the history to hold non-geometry
   items; that comes later.
 - **No nested components yet.** New components always sit at the top of the design.
+- **Sketches don't move with their bodies** between components: they stay where they were
+  drawn, and the features built on them compute as before. A body with joints can't move to
+  another component (its joints would have to follow it); delete the joints first.
+- **A copy follows edits made before the copy step** (it is made from the original's history),
+  like any copied body; features added to either one afterwards change only that one.
 - **A seam is not a snap point.** A round face's seam edge, and the seam vertex of a circle, offer
   their face's snaps (axis, rim centres) instead of points nobody means to pick.

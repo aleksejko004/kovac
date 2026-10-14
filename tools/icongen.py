@@ -1228,6 +1228,16 @@ def instance(g):
     g.prism(rect_xy(9, -1, 0, 6, 6), (0, 0, 4), accent=[0, 1, 2, 3])
 
 
+def copy_component(g):
+    """Copy: the part, and an independent copy beside it, marked new with an accent plus (an
+    instance's copy is the accent itself: linked)."""
+    g.prism(rect_xy(0, 0, 0, 6, 6), (0, 0, 4))
+    g.prism(rect_xy(9, -1, 0, 6, 6), (0, 0, 4))
+    cx, cy = g.p((12, 2, 4))                      # on the copy's top face
+    g.line((cx - 2, cy), (cx + 2, cy), g.t["accent"], STROKE)
+    g.line((cx, cy - 2), (cx, cy + 2), g.t["accent"], STROKE)
+
+
 def ground(g):
     """Ground: a part standing on a hatched ground line (the accent)."""
     g.prism(rect_xy(2, 2, 0, 7, 7), (0, 0, 5))
@@ -1351,7 +1361,7 @@ ICONS = {
     "balloon": (balloon, "drawing"), "parts_list": (parts_list, "drawing"), "export_pdf": (export_pdf, "file"),
     "export_dxf": (export_dxf, "file"),
     # assemblies
-    "new_component": (new_component, "assembly"), "instance": (instance, "assembly"), "ground": (ground, "assembly"),
+    "new_component": (new_component, "assembly"), "instance": (instance, "assembly"), "copy_component": (copy_component, "assembly"), "ground": (ground, "assembly"),
     "drag_part": (drag_part, "assembly"), "j_rigid": (j_rigid, "assembly"), "j_revolute": (j_revolute, "assembly"),
     "j_slider": (j_slider, "assembly"), "j_cylindrical": (j_cylindrical, "assembly"), "j_ball": (j_ball, "assembly"),
     "j_planar": (j_planar, "assembly"), "flip": (flip, "assembly"),
