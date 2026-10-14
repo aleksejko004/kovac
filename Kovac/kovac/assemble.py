@@ -133,6 +133,34 @@ class JointTool:
         row.addWidget(flip)
         row.addWidget(again)
         lay.addLayout(row)
+        self.motion = QtWidgets.QWidget(w)              # turning and sliding joints: position, limits, Play
+        mg = QtWidgets.QGridLayout(self.motion)
+        mg.setContentsMargins(0, 6, 0, 0)
+        self.coords = {}
+        for r, (key, label) in enumerate((("angle", "Angle"), ("slide", "Slide"))):
+            name = key.capitalize()
+            pos, lo, hi = (move._Field(w) for _ in range(3))
+            on = QtWidgets.QCheckBox("Limit", objectName="kovacJoint%sLimit" % name)
+            for f, suffix in ((pos, ""), (lo, "Min"), (hi, "Max")):
+                f.setObjectName("kovacJoint%s%s" % (name, suffix))
+                f.setMaximumWidth(80)
+            lab = QtWidgets.QLabel(label)
+            to = QtWidgets.QLabel("to")
+            for c, wid in enumerate((lab, pos, on, lo, to, hi)):
+                mg.addWidget(wid, r, c)
+            pos.editingFinished.connect(lambda k=key: self.drive(k))
+            pos.returnPressed.connect(lambda k=key: self.drive(k))
+            on.toggled.connect(lambda _=False, k=key: self.limit(k))
+            for f in (lo, hi):
+                f.editingFinished.connect(lambda k=key: self.limit(k))
+                f.returnPressed.connect(lambda k=key: self.limit(k))
+            self.coords[key] = {"row": (lab, pos, on, lo, to, hi), "pos": pos, "on": on, "lo": lo, "hi": hi}
+        self.play_button = QtWidgets.QPushButton("Play", objectName="kovacJointPlay")
+        self.play_button.setToolTip("Run the joint through its range (between its limits, or a full turn)")
+        self.play_button.clicked.connect(self.play)
+        mg.addWidget(self.play_button, 2, 0, 1, 2)
+        lay.addWidget(self.motion)
+        self.playing = None
         self.status = QtWidgets.QLabel(objectName="kovacMuted")
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
@@ -165,13 +193,133 @@ class JointTool:
             self.turn.setText("%.1f°" % float(j.Turn)) if not self.turn.hasFocus() else None
         for f in (self.gap, self.turn):
             f.setEnabled(j is not None)
+        self.refresh_motion()
         self.ok_button.setEnabled(j is not None)
         if j is not None:
-            self.status.setText(getattr(self, "problem", "") or "Drag the moving part later with Drag to try the joint.")
+            hint = "Type an angle or slide, limit it, or Play to try the joint; Drag pulls it in the view." \
+                if joints.MOVES.get(joints.FREECAD[self.kind]) else "Drag the moving part later with Drag to try the joint."
+            self.status.setText(getattr(self, "problem", "") or hint)
         elif not self.picks:
             self.status.setText("Click where the joint sits on the part that stays (a face, circle, edge or corner).")
         else:
             self.status.setText("Now click where it sits on the part that moves: it snaps into place.")
+
+    def refresh_motion(self):
+        j = self.joint
+        free = joints.MOVES.get(joints.FREECAD[self.kind], ())
+        self.motion.setVisible(bool(free))
+        if j is None or not free:
+            return
+        ang, sl = joints.position(j)
+        lim = joints.limits(j) if hasattr(j, "TurnLimits") else {"angle": None, "slide": None}
+        units = {"angle": ("%.1f°", ang), "slide": ("%.2f mm", sl)}
+        for key, c in self.coords.items():
+            for wid in c["row"]:
+                wid.setVisible(key in free)
+            fmt, value = units[key]
+            if not c["pos"].hasFocus():
+                c["pos"].setText(fmt % value)
+            on = lim[key] is not None
+            c["on"].blockSignals(True)
+            c["on"].setChecked(on)
+            c["on"].blockSignals(False)
+            if on:
+                for f, v in ((c["lo"], lim[key][0]), (c["hi"], lim[key][1])):
+                    if not f.hasFocus():
+                        f.setText(fmt % v)
+            for f in (c["lo"], c["hi"]):
+                f.setEnabled(on)
+        self.play_button.setText("Stop" if self.playing else "Play")
+
+    @staticmethod
+    def _value(field, unit):
+        q = App.Units.Quantity(field.text().strip().replace(",", ".").replace("°", " deg"))
+        return q.Value if q.Unit == App.Units.Unit() else q.getValueAs(unit).Value
+
+    def drive(self, key):
+        """A typed angle or slide: the joint moves there (within its limits), the rest follows."""
+        if self.joint is None:
+            return
+        try:
+            v = self._value(self.coords[key]["pos"], "deg" if key == "angle" else "mm")
+        except Exception:
+            return self.refresh()
+        if abs(joints.position(self.joint)[0 if key == "angle" else 1] - v) > 1e-9:
+            if not joints.set_position(self.doc, self.joint, **{key: v}):
+                self.problem = "It can't go there: the other joints or a grounded part hold it."
+            else:
+                self.problem = ""
+        self.refresh()
+
+    def limit(self, key):
+        """The Limit box or a Min / Max: store the limits and bring the joint back inside them."""
+        if self.joint is None:
+            return
+        c = self.coords[key]
+        if not c["on"].isChecked():
+            joints.set_limits(self.joint, **{key: None})
+        else:
+            unit = "deg" if key == "angle" else "mm"
+            now = joints.position(self.joint)[0 if key == "angle" else 1]
+            try:
+                lo = self._value(c["lo"], unit) if c["lo"].text().strip() else min(now, 0.0)
+                hi = self._value(c["hi"], unit) if c["hi"].text().strip() else max(now, 0.0) + (90 if key == "angle" else 10)
+            except Exception:
+                return self.refresh()
+            joints.set_limits(self.joint, **{key: (lo, hi)})
+            joints.set_position(self.doc, self.joint)          # back inside, if it was out
+        self.refresh()
+
+    def play(self):
+        """Run the joint through its range and back: between its limits, or one full turn."""
+        if self.playing is not None:
+            return self.stop_play()
+        j = self.joint
+        if j is None:
+            return
+        free = joints.MOVES.get(j.JointType, ())
+        lim = joints.limits(j)
+        start = joints.position(j)
+        path = []
+        n = 45
+        for key in free:
+            i = 0 if key == "angle" else 1
+            if lim[key]:
+                lo, hi = lim[key]
+                there = [lo + (hi - lo) * k / n for k in range(n + 1)]
+                path_key = [start[i] + (lo - start[i]) * k / 10 for k in range(10)] + there + there[::-1] + \
+                    [lo + (start[i] - lo) * k / 10 for k in range(11)]
+            elif key == "angle":
+                path_key = [start[i] + 360.0 * k / (2 * n) for k in range(2 * n + 1)]
+            else:
+                continue
+            path.append((key, path_key))
+        if not path:
+            self.status.setText("Set slide limits to play a slider.")
+            return
+        frames = max(len(p) for _, p in path)
+        self.playing = {"frames": [{key: p[min(k, len(p) - 1)] for key, p in path} for k in range(frames)], "at": 0,
+                        "start": start}
+        self.timer = QtCore.QTimer(self.dock)
+        self.timer.timeout.connect(self._play_step)
+        self.timer.start(33)
+        self.refresh()
+
+    def _play_step(self):
+        p = self.playing
+        if p is None or self.joint is None or p["at"] >= len(p["frames"]):
+            return self.stop_play()
+        joints.set_position(self.doc, self.joint, **p["frames"][p["at"]])
+        p["at"] += 1
+        self.refresh_motion()
+
+    def stop_play(self):
+        if getattr(self, "timer", None) is not None:
+            self.timer.stop()
+            self.timer = None
+        self.playing = None
+        if self.joint is not None and self.doc.getObject(self.joint.Name) is not None:
+            self.refresh()
 
     def set_kind(self, kind):
         self.kind = _last["kind"] = kind
@@ -312,6 +460,7 @@ class JointTool:
 
     def close(self):
         global _tool
+        self.stop_play()
         commands.ended(self.running)
         self._clear()
         if self in navigation.hooks:
@@ -401,11 +550,11 @@ def motion(comp, grab, it, pos, start):
             q = overlay.closest_on_line(ro, rd, p, z)
             q0 = p + z * (grab - p).dot(z)
             m = App.Placement(z * (q - q0).dot(z), App.Rotation()).multiply(m)
-        return m.multiply(start)
+        return joints.clamp(j, comp, m.multiply(start))         # stops at the joint's limits
     if t == "Slider":
         ro, rd = overlay.ray(it, pos)
         q = overlay.closest_on_line(ro, rd, grab, z)
-        return App.Placement(z * (q - grab).dot(z), App.Rotation()).multiply(start)
+        return joints.clamp(j, comp, App.Placement(z * (q - grab).dot(z), App.Rotation()).multiply(start))
     if t == "Ball":
         r = (grab - p).Length
         hit = _ray_plane(it, pos, grab, view_n)

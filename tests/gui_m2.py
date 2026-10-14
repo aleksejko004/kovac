@@ -1271,6 +1271,49 @@ def seg_assembly():
     check("the browser's Joints folder lists the joint and the ground", jl == ["Joints  (2)"], jl)
     shot("assembly_joint")
 
+    # -- driving the joint from its panel: a typed angle, a limit, Play --
+    assemble.edit_joint(j)
+    yield 400
+    ed = assemble._tool
+    dock = ed.dock if ed else None
+    angle = dock.findChild(QtWidgets.QLineEdit, "kovacJointAngle") if dock else None
+    if angle is not None:
+        angle.setFocus()
+        angle.setText("30")
+        angle.returnPressed.emit()
+    yield 300
+    check("Joint panel: a typed angle turns the pin about the hinge",
+          angle is not None and abs(joints.position(j)[0] - 30) < 1e-4 and joints.satisfied(j),
+          (angle is not None, joints.position(j)))
+    box = dock.findChild(QtWidgets.QCheckBox, "kovacJointAngleLimit") if dock else None
+    lo, hi = (dock.findChild(QtWidgets.QLineEdit, n) for n in ("kovacJointAngleMin", "kovacJointAngleMax")) if dock else (None, None)
+    if box is not None:
+        lo.setText("-60")
+        hi.setText("45")
+        box.setChecked(True)
+        angle.setText("80")
+        angle.returnPressed.emit()
+    yield 300
+    check("Joint panel: with the angle limited to -60 … 45, typing 80 stops at 45",
+          box is not None and joints.limits(j)["angle"] == (-60.0, 45.0) and abs(joints.position(j)[0] - 45) < 1e-4,
+          (joints.limits(j), joints.position(j)))
+    play = dock.findChild(QtWidgets.QPushButton, "kovacJointPlay") if dock else None
+    seen = []
+    if play is not None:
+        press(play)
+        for _ in range(80):
+            yield 50
+            seen.append(joints.position(j)[0])
+            if ed.playing is None:
+                break
+    check("Play runs the joint between its limits and back to where it was",
+          play is not None and ed.playing is None and min(seen) < -59 and max(seen) > 44 and
+          abs(joints.position(j)[0] - 45) < 1e-3, (seen and (min(seen), max(seen)), joints.position(j)))
+    shot("assembly_joint_motion")
+    if ed is not None:
+        ed.ok()
+    yield 300
+
     # -- sketching after a joint: a selected face of a component, then a face clicked in the picker --
     def new_sketch(act):
         before = {o.Name for o in doc.Objects}
@@ -1387,7 +1430,7 @@ def seg_assembly():
     yield 200
 
     # -- undo the joint: gone, the pin back where it was --
-    for _ in range(10):
+    for _ in range(20):
         if doc.UndoNames and doc.UndoNames[0] == "Joint":
             break
         doc.undo()

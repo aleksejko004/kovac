@@ -137,6 +137,11 @@ Writing all joint origins from references takes about 1.3 ms per joint, once per
   by the fixed difference between the two components' placements keeps them where they are
   shown; deleting a moved component uses the same step. Copy Component (`copy_component`): a
   history step that copies the bodies into a new component.
+- Joint limits and driving (`joints.position`, `set_limits`, `set_position`, `clamp`): a turning
+  or sliding joint's position is side 2's frame against side 1's, counted from the jointed
+  position. Limits are Kovač's own properties (FreeCAD's limit properties stay off, its solver
+  counts from another zero); the solve check rejects positions outside them, Drag clamps to
+  them, and the Joint panel types, limits and plays the position.
 - Tests: `tests/test_components.py` (16 headless tests) and GUI segment `assembly`.
 
 Deviations from the decision above:

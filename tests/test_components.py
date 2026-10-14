@@ -322,6 +322,59 @@ class Joints(unittest.TestCase):
         p, _ = self.pin_bottom()
         self.assertLess((p - V(30, 20, 10)).Length, 1e-5)
 
+    # ------------------------------------------------------------ limits and driving
+    def test_revolute_position_reads_and_drives(self):
+        j = self.revolute()
+        ang, _ = joints.position(j)
+        self.assertAlmostEqual(ang, 0, 6)                       # as jointed
+        self.assertTrue(joints.set_position(self.doc, j, angle=30))
+        self.assertAlmostEqual(joints.position(j)[0], 30, 5)
+        self.assertTrue(joints.satisfied(j))
+        p, _ = self.pin_bottom()
+        self.assertLess((p - V(15, 20, 10)).Length, 1e-5)       # turned in place
+
+    def test_angle_limits_hold_driving_and_dragging(self):
+        j = self.revolute()
+        joints.set_limits(j, angle=(-20, 45))
+        joints.set_position(self.doc, j, angle=80)
+        self.assertAlmostEqual(joints.position(j)[0], 45, 5)    # stops at the limit
+        a, _ = joints.global_frames(j)
+        z = a.Rotation.multVec(V(0, 0, 1))
+        far = App.Placement(V(), App.Rotation(z, -120), a.Base).multiply(self.pin.Placement)
+        held = joints.clamp(j, self.pin, far)                   # a drag past the other limit
+        self.pin.Placement = held
+        self.assertAlmostEqual(joints.position(j)[0], -20, 5)
+        self.assertTrue(joints.satisfied(j))
+
+    def test_out_of_limits_drag_is_refused(self):
+        j = self.revolute()
+        joints.set_limits(j, angle=(-10, 10))
+        before = App.Placement(self.pin.Placement)
+        a, _ = joints.global_frames(j)
+        z = a.Rotation.multVec(V(0, 0, 1))
+        self.assertFalse(joints.drag(self.doc, self.pin, App.Placement(V(), App.Rotation(z, 60), a.Base).multiply(before)))
+        self.assertTrue(self.pin.Placement.isSame(before, 1e-7))
+
+    def test_slider_slide_limits(self):
+        j = self.revolute("Slider")
+        joints.set_limits(j, slide=(0, 12))
+        joints.set_position(self.doc, j, slide=20)
+        self.assertAlmostEqual(joints.position(j)[1], 12, 5)
+        self.assertTrue(joints.satisfied(j))
+        joints.set_limits(j, slide=None)                        # limits off again
+        joints.set_position(self.doc, j, slide=20)
+        self.assertAlmostEqual(joints.position(j)[1], 20, 5)
+
+    def test_limits_survive_save_and_reopen(self):
+        j = self.revolute()
+        joints.set_limits(j, angle=(-5, 50))
+        path = os.path.join(tempfile.mkdtemp(), "l.FCStd")
+        self.doc.saveAs(path)
+        name = j.Name
+        App.closeDocument(self.doc.Name)
+        self.doc = App.openDocument(path)
+        self.assertEqual(joints.limits(self.doc.getObject(name)), {"angle": (-5.0, 50.0), "slide": None})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -71,7 +71,7 @@ then a stop for owner review.
 - Tests: each joint type's remaining degrees of freedom, references surviving the toponaming
   torture edits, one undo step per joint.
 
-### Step 4 — Motion
+### Step 4 — Motion — built, except the contact check
 - Drag a component in the view: the solver keeps its joints (a hinge swings, a slider slides).
 - Joint limits (min/max angle or distance), and "drive" a joint from its panel to animate it.
 - Contact check while dragging (uses the existing interference tool), optional.

@@ -11,13 +11,19 @@ where its two frames are:
 - a reference that can't be resolved flags the joint ("Missing reference: ..."), and the
   components stay where they were;
 - the solver's answer is checked (``verify``): grounded components unmoved, every joint's frames
-  meeting the way its type says. A wrong answer is undone and reported, never shown.
+  meeting the way its type says, and within its limits. A wrong answer is undone and reported,
+  never shown.
+
+A turning or sliding joint has a *position*: the turn about and the slide along side 1's axis
+of side 2's frame, 0 as jointed. Optional limits keep it in a range; ``set_position`` drives it
+and ``clamp`` holds a drag inside the limits.
 
 Frame convention: Z is the outward normal of the face snapped to (a circle edge takes its flat
 face's), so two snapped faces *meet* (side 2 is turned over); X follows the body's own axes
 projected onto the plane, so it doesn't spin when the part is edited.
 """
 import json
+import math
 
 import FreeCAD as App
 import Part
@@ -34,6 +40,11 @@ HELP = {"Rigid": "locked together", "Revolute": "turns about the axis", "Slider"
         "Cylindrical": "turns and slides along the axis", "Ball": "turns any way about the point",
         "Planar": "slides and turns on the plane"}
 TOL = 1e-5
+MOVES = {"Revolute": ("angle",), "Slider": ("slide",), "Cylindrical": ("angle", "slide")}   # FreeCAD type -> free coordinates
+# Kovač's own limit properties, measured from the jointed position (FreeCAD's AngleMin/LengthMin
+# and their Enable flags stay off: its solver would count from its own zero)
+_LIMIT_PROPS = {"angle": ("TurnLimits", "TurnMin", "TurnMax", "App::PropertyAngle", (-90.0, 90.0), "turn"),
+                "slide": ("SlideLimits", "SlideMin", "SlideMax", "App::PropertyDistance", (0.0, 10.0), "slide")}
 
 
 # ---------------------------------------------------------------- frames from geometry
@@ -341,6 +352,131 @@ def satisfied(j):
     return True
 
 
+# ---------------------------------------------------------------- position and limits
+
+def _ensure_limits(j):
+    """Limit properties (older joints get them on first use)."""
+    for on, lo, hi, typ, (dlo, dhi), what in _LIMIT_PROPS.values():
+        if not hasattr(j, on):
+            j.addProperty("App::PropertyBool", on, "Limits", "keep the %s within Min and Max" % what)
+            j.addProperty(typ, lo, "Limits", "smallest %s" % what)
+            j.addProperty(typ, hi, "Limits", "largest %s" % what)
+            setattr(j, lo, dlo)
+            setattr(j, hi, dhi)
+
+
+def limits(j):
+    """{"angle": (min, max) or None, "slide": (min, max) or None}: the limits that are on."""
+    out = {}
+    for key, (on, lo, hi, *_rest) in _LIMIT_PROPS.items():
+        out[key] = (float(getattr(j, lo)), float(getattr(j, hi))) if getattr(j, on, False) else None
+    return out
+
+
+_KEEP = object()
+
+
+def set_limits(j, angle=_KEEP, slide=_KEEP):
+    """Turn limits on with a (min, max) pair or off with None; leave out to keep as is."""
+    _ensure_limits(j)
+    for key, value in (("angle", angle), ("slide", slide)):
+        if value is _KEEP:
+            continue
+        on, lo, hi, *_rest = _LIMIT_PROPS[key]
+        if value is None:
+            setattr(j, on, False)
+            continue
+        a, b = sorted(float(x) for x in value)
+        setattr(j, lo, a)
+        setattr(j, hi, b)
+        setattr(j, on, True)
+
+
+def _move(angle, slide):
+    return App.Placement(V(0, 0, slide), App.Rotation(V(0, 0, 1), angle))
+
+
+def position(j, frames=None):
+    """(turn in degrees, slide in mm) of side 2's frame against side 1's, about and along side
+    1's axis; (0, 0) as jointed."""
+    a, b = frames or global_frames(j)
+    r = a.inverse().multiply(b)
+    x = r.Rotation.multVec(V(1, 0, 0))
+    return math.degrees(math.atan2(x.y, x.x)), r.Base.z
+
+
+def _limited(j, angle, slide):
+    lim = limits(j)
+    free = MOVES.get(j.JointType, ())
+    if "angle" in free and lim["angle"]:
+        angle = min(max(angle, lim["angle"][0]), lim["angle"][1])
+    if "slide" in free and lim["slide"]:
+        slide = min(max(slide, lim["slide"][0]), lim["slide"][1])
+    return angle, slide
+
+
+def within(j, frames=None):
+    """True if the joint's position is inside its limits (always, for joints without any)."""
+    if j.JointType not in MOVES or not (getattr(j, "TurnLimits", False) or getattr(j, "SlideLimits", False)):
+        return True
+    ang, sl = position(j, frames)
+    a2, s2 = _limited(j, ang, sl)
+    return abs(a2 - ang) < 1e-4 and abs(s2 - sl) < TOL
+
+
+def _frames_with(j, comp, placement):
+    o1, o2 = origins(j)
+    p1 = placement if o1.comp == comp else o1.comp.Placement
+    p2 = placement if o2.comp == comp else o2.comp.Placement
+    return p1.multiply(j.Placement1), p2.multiply(j.Placement2)
+
+
+def _placed(j, comp, frames, angle, slide):
+    """comp's placement that brings the joint from its position in `frames` to (angle, slide),
+    the other side holding still."""
+    a, b = frames
+    now = position(j, frames)
+    fix = _move(angle, slide).multiply(_move(*now).inverse())       # in side 1's frame
+    o1, o2 = origins(j)
+    if o2.comp == comp:
+        b2 = a.multiply(fix).multiply(a.inverse()).multiply(b)
+        return b2.multiply(j.Placement2.inverse())
+    r2 = fix.multiply(a.inverse().multiply(b))
+    return b.multiply(r2.inverse()).multiply(j.Placement1.inverse())
+
+
+def clamp(j, comp, placement):
+    """The placement for comp nearest to `placement` that keeps joint j within its limits."""
+    if j.JointType not in MOVES:
+        return placement
+    frames = _frames_with(j, comp, placement)
+    ang, sl = position(j, frames)
+    a2, s2 = _limited(j, ang, sl)
+    if abs(a2 - ang) < 1e-9 and abs(s2 - sl) < 1e-12:
+        return placement
+    return _placed(j, comp, frames, a2, s2)
+
+
+def moving_side(j):
+    """The component that moves when the joint is driven: side 2's, unless it is grounded."""
+    o1, o2 = origins(j)
+    return o1.comp if o2.comp in grounded(j.Document) and o1.comp not in grounded(j.Document) else o2.comp
+
+
+def set_position(doc, j, angle=None, slide=None):
+    """Drive a turning or sliding joint to (angle, slide), within its limits; None keeps that
+    coordinate. The rest of the design follows through the solver; True if it holds."""
+    if j.JointType not in MOVES:
+        return False
+    comp = moving_side(j)
+    if comp in grounded(doc):
+        return False
+    frames = global_frames(j)
+    ang, sl = position(j, frames)
+    a2, s2 = _limited(j, ang if angle is None else float(angle), sl if slide is None else float(slide))
+    return drag(doc, comp, _placed(j, comp, frames, a2, s2))
+
+
 def snap_into_place(j):
     """Move the joint's second component so the joint holds (what making a joint does), then
     solve. Starting from a joined state keeps the solver from wandering (ADR-0004, E4)."""
@@ -363,7 +499,7 @@ def solve(doc):
     code = asm.solve()
     fixed = grounded(doc)
     moved_ground = [c for c in fixed if c.Name in before and not c.Placement.isSame(before[c.Name], 1e-7)]
-    bad = [j for j in js if not satisfied(j)]
+    bad = [j for j in js if not satisfied(j) or not within(j)]
     if code == 0 and not moved_ground and not bad:
         return ""
     for c in components.all_components(doc):       # undo: the solver's answer is wrong
