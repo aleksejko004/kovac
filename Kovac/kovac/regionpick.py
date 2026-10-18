@@ -26,8 +26,12 @@ class RegionPicker:
         keys = list(self.ed.fp.Regions)
         if keys:
             return set(keys)
-        auto = regions.default(rs)
-        return {r.key for r in auto} if len(auto) == 1 else set()
+        sk = getattr(self.ed.fp, "Profile", None)
+        auto = regions.automatic(sk) if sk is not None else []
+        if len(auto) != 1:
+            return set()
+        # the drawn area may be split into several regions by the projected outline
+        return {r.key for r in rs if auto[0].face.isInside(r.point, 1e-6, True)}
 
     def refresh(self):
         overlay.remove(self.node)

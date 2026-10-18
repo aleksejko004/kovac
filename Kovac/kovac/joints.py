@@ -274,12 +274,84 @@ def create(doc, kind, o1, o2, offset=0.0, angle=0.0, flip=False):
             if c.Name in before:
                 c.Placement = before[c.Name]
         raise ValueError("This joint can't hold together with the others (%s)." % msg.split(": ", 1)[-1].rstrip("."))
+    add_step(j)
     return j
 
 
 def set_kind(j, kind):
     j.JointType = FREECAD[kind]
     j.Label = "%s · %s" % (kind, j.Label.split(" · ", 1)[-1])
+    step = step_of(j)
+    if step is not None:
+        step.Label = "Joint " + j.Label         # labels are unique: not the joint's own
+        vo = getattr(step, "ViewObject", None)
+        if vo is not None and hasattr(vo.Proxy, "icon"):
+            vo.Proxy.icon = ICONS.get(j.JointType, "joint")
+
+
+# ---------------------------------------------------------------- the joint's timeline step
+
+ICONS = {"Fixed": "j_rigid", "Revolute": "j_revolute", "Slider": "j_slider", "Cylindrical": "j_cylindrical",
+         "Ball": "j_ball", "Distance": "j_planar"}
+
+
+class JointStep(model.Feature):
+    """A joint's place in the history (ADR-0004): rolled back before it, or suppressed, the
+    joint is off and its parts move freely; deleting the step deletes the joint. It changes no
+    body, and its Status shows the joint's problem in the timeline."""
+    kind, icon, state_feature = "Joint", "joint", False
+
+    def setup(self, fp):
+        fp.addProperty("App::PropertyString", "Joint", "Joint", "the joint (its name)", 1)
+
+    def execute(self, fp):
+        pass                                     # nothing to compute; update() keeps Status
+
+    def removed(self, fp):
+        j = fp.Document.getObject(fp.Joint)
+        if j is not None:
+            fp.Document.removeObject(j.Name)
+
+
+def _is_step(o):
+    return type(getattr(o, "Proxy", None)).__name__ == "JointStep"
+
+
+def step_of(j):
+    return next((o for o in model.items(j.Document) if _is_step(o) and o.Joint == j.Name), None)
+
+
+def joint_of(step):
+    return step.Document.getObject(step.Joint)
+
+
+def add_step(j, index=None):
+    """The joint's step at the rollback marker (or at index)."""
+    doc = j.Document
+    fp = doc.addObject("App::FeaturePython", "JointStep")
+    JointStep(fp)
+    if App.GuiUp and fp.ViewObject is not None:
+        model.ViewProvider(fp.ViewObject, ICONS.get(j.JointType, "joint"))
+    fp.Joint = j.Name
+    fp.Label = "Joint " + j.Label
+    model.insert(doc, fp, index)
+    return fp
+
+
+def is_on(j):
+    """False while the joint's step is rolled back or suppressed."""
+    step = step_of(j)
+    return step is None or (model.active(step) and not step.Suppressed)
+
+
+def delete(j):
+    """Delete a joint (or a ground) together with its timeline step."""
+    doc = j.Document
+    step = step_of(j) if is_joint(j) else None
+    if step is not None:
+        model.remove(doc, step)                  # takes the joint along (JointStep.removed)
+    elif doc.getObject(j.Name) is not None:
+        doc.removeObject(j.Name)
 
 
 def kind_of(j):
@@ -492,7 +564,7 @@ def solve(doc):
     """Solve the design's joints and check the answer. Returns '' or what went wrong; a wrong
     answer is undone (components back where they were)."""
     asm = components.root(doc)
-    js = [j for j in all_joints(doc) if not j.KovacStatus]
+    js = [j for j in all_joints(doc) if not j.KovacStatus and not j.Suppressed]
     if asm is None or not js:
         return ""
     before = {c.Name: c.Placement for c in components.all_components(doc)}
@@ -510,13 +582,36 @@ def solve(doc):
 
 
 def update(doc):
-    """After every regeneration: joint origins from today's geometry, then solve and check."""
+    """After every regeneration: each joint on or off by its timeline step, origins from today's
+    geometry, a joint just switched on snapped into place again, then solve and check."""
     if components.root(doc) is None:
         return ""
-    for j in all_joints(doc):
-        write(j)
+    for step in [o for o in model.items(doc) if _is_step(o) and joint_of(o) is None]:
+        model.remove(doc, step)                  # its joint was deleted elsewhere
+    js = all_joints(doc)
+    for j in js:
+        if step_of(j) is None:                   # made before joints had steps
+            add_step(j, len(model.items(doc)))
+    back_on = []
+    for j in js:
+        off = not is_on(j)
+        if j.Suppressed != off:
+            j.Suppressed = off
+            if not off:
+                back_on.append(j)
+        if not off:
+            write(j)
     doc.recompute()
-    return solve(doc)
+    for j in back_on:
+        o1, o2 = origins(j)
+        if not j.KovacStatus and o2.comp not in grounded(doc):
+            o2.comp.Placement = o1.comp.Placement.multiply(j.Placement1).multiply(j.Placement2.inverse())
+    msg = solve(doc)
+    for j in js:
+        step = step_of(j)
+        if step is not None and step.Status != j.KovacStatus:
+            step.Status = j.KovacStatus
+    return msg
 
 
 def drag(doc, comp, placement):

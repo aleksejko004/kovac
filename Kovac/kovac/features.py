@@ -24,7 +24,7 @@ def _sketch_regions(fp, sketch):
         raise ValueError("%s has no closed profile. Close the outline in the sketch." % sketch.Label)
     if fp.Regions:
         return regions.pick(found, list(fp.Regions), [tuple(p) for p in getattr(fp, "RegionPoints", [])])
-    auto = regions.default(found)
+    auto = regions.automatic(sketch, local=True)
     # A sketch with one region (holes aside) has nothing to choose between, so picking none
     # is as good as picking it -- the common case stays a one-click extrude. More than one and
     # picking none is ambiguous: say so rather than silently combining every one of them.
@@ -318,7 +318,7 @@ class Loft(model.Feature):
     def tool(self, fp, state):
         if len(fp.Sections) < 2:
             raise ValueError("A loft needs at least two sections.")
-        firsts = [regions.default(regions.of_sketch(s, local=True)) for s in fp.Sections]
+        firsts = [regions.automatic(s, local=True) for s in fp.Sections]
         if any(len(r) != 1 for r in firsts):
             raise ValueError("Each loft section must have exactly one closed profile.")
         wires = [r[0].face.OuterWire for r in firsts]

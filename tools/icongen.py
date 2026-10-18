@@ -1213,6 +1213,31 @@ def export_dxf(g):
     g.poly(g.ellipse2d((10, 10), 2, 2, 16), stroke=g.t["icon_line"], width=HAIR)
 
 
+def export_bodies(g):
+    """Export: a part, and an accent arrow leaving it (Import STEP's arrow, the other way)."""
+    g.prism(rect_xy(-1, 3, 0, 7, 7), (0, 0, 5))
+    g.arrow((7, 7), (15, 15))
+
+
+def _small_sheet(g, x0, x1):
+    g.poly(_rect2((x0, 6), (x1, 20)), stroke=g.t["accent"], width=STROKE)
+
+
+def export_one(g):
+    """One file: two parts on one sheet (the accent outline)."""
+    _small_sheet(g, 2.5, 21.5)
+    g.poly(_rect2((5, 12), (10, 17)), fill=g.t["surface"], stroke=g.t["icon_line"])
+    g.poly(_rect2((14, 12), (19, 17)), fill=g.t["surface"], stroke=g.t["icon_line"])
+
+
+def export_each(g):
+    """One file per body: each part on a sheet of its own."""
+    _small_sheet(g, 2.5, 11)
+    _small_sheet(g, 13, 21.5)
+    g.poly(_rect2((4.5, 12), (9, 17)), fill=g.t["surface"], stroke=g.t["icon_line"])
+    g.poly(_rect2((15, 12), (19.5, 17)), fill=g.t["surface"], stroke=g.t["icon_line"])
+
+
 def new_component(g):
     """New Component: a part with an accent outline box around it (the container)."""
     g.prism(rect_xy(1.5, 1.5, 0, 6, 6), (0, 0, 4))
@@ -1359,7 +1384,8 @@ ICONS = {
     "new_drawing": (new_drawing, "drawing"), "view_base": (view_base, "drawing"), "view_proj": (view_proj, "drawing"),
     "section_view": (section_view, "drawing"), "detail_view": (detail_view, "drawing"), "callout": (callout, "drawing"),
     "balloon": (balloon, "drawing"), "parts_list": (parts_list, "drawing"), "export_pdf": (export_pdf, "file"),
-    "export_dxf": (export_dxf, "file"),
+    "export_dxf": (export_dxf, "file"), "export": (export_bodies, "file"),
+    "export_one": (export_one, "option"), "export_each": (export_each, "option"),
     # assemblies
     "new_component": (new_component, "assembly"), "instance": (instance, "assembly"), "copy_component": (copy_component, "assembly"), "ground": (ground, "assembly"),
     "drag_part": (drag_part, "assembly"), "j_rigid": (j_rigid, "assembly"), "j_revolute": (j_revolute, "assembly"),

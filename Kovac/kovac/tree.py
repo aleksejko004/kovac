@@ -16,7 +16,7 @@ FOLDERS = (("body", "Bodies"), ("sketch", "Sketches"), ("reference", "Reference 
 CONTAINERS = ("App::Part", "Assembly::AssemblyObject")
 _FEATURE_PROXIES = {"Extrude", "Revolve", "Sweep", "Loft", "Primitive", "Hole", "Fillet", "Chamfer", "Shell", "Draft",
                     "FacePull", "MoveFace", "DeleteFace", "Combine", "SplitBody", "Transform", "Scale", "Mirror", "Pattern",
-                    "Thread", "Import", "RemoveBody"}
+                    "Thread", "Import", "RemoveBody", "JointStep"}
 ICONS = {"body": "body", "sketch": "sketch", "component": "component", "joint": "joint", "analysis": "section",
          "reference": "plane"}
 
@@ -29,7 +29,7 @@ def role(obj):
         return "linked"                              # a linked copy of a body (ADR-0005)
     if proxy == "BodyProxy":
         return "body" if not obj.Shape.isNull() else "machinery"
-    if proxy == "HistoryProxy":
+    if proxy in ("HistoryProxy", "BodyAt"):
         return "machinery"
     if proxy == "Curve3DProxy":
         return "sketch"
@@ -282,6 +282,9 @@ def create():
             from kovac import curve3d
             if curve3d.is_curve(o):
                 curve3d.edit(o)
+            elif o is not None and o.TypeId.startswith("Sketcher::"):
+                from kovac import sketchmode
+                sketchmode.edit(o)
             elif o is not None and role(o) == "component" and o.TypeId == "App::Part":
                 from kovac import components          # double-click again: back to the top
                 view = Gui.ActiveDocument.ActiveView
@@ -317,7 +320,14 @@ def create():
                     m.addAction("Edit joint…", lambda: assemble.edit_joint(o))
                 if role(o) == "body":
                     m.addAction("Material…", lambda: commands.run("Kovac_Material"))
+                    bodies = [x for x in sel if role(x) == "body"] if o in sel else [o]
+                    m.addAction("Make component" if len(bodies) == 1 else "Make component of %d bodies" % len(bodies),
+                                lambda: self.make_component(bodies))
                     self.move_menu(m, o, sel)
+                if role(o) in ("body", "component", "linked"):
+                    parts = [x for x in sel if role(x) in ("body", "component", "linked")] if o in sel else [o]
+                    m.addAction("Export…" if len(parts) == 1 else "Export %d…" % len(parts),
+                                lambda: self.export(parts))
                 if role(o) == "linked":
                     m.addAction("Make independent", lambda: self.make_independent(o))
                 if len(sel) > 1 and o in sel:
@@ -341,6 +351,21 @@ def create():
                 a.setEnabled(here != {c})
             a = sub.addAction("Top of the design", lambda: self.run_move(bodies, None))
             a.setEnabled(here != {None})
+
+        def make_component(self, bodies):
+            from kovac import assemble
+            try:
+                assemble.new_component(bodies)
+            except Exception as e:
+                commands.report(e)
+            self.rebuild()
+
+        def export(self, parts):
+            from kovac import exportpanel
+            Gui.Selection.clearSelection()
+            for x in parts:
+                Gui.Selection.addSelection(x)
+            exportpanel.open_panel()
 
         def make_independent(self, link):
             from kovac import copies, model
@@ -400,6 +425,9 @@ def create():
                         elif role(o) == "linked":
                             from kovac import copies
                             copies.remove(o)
+                        elif role(o) == "joint":
+                            from kovac import joints
+                            joints.delete(o)
                         else:
                             doc.removeObject(o.Name)
             except Exception as e:

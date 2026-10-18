@@ -54,6 +54,15 @@ class Regions(unittest.TestCase):
         r = regions.find(rect(0, 0, 40, 20) + [(seg((10, -5), (10, 25)), 7), (seg((25, 5), (30, 5)), 8)])
         self.assertEqual(sorted(round(x.face.Area) for x in r), [200, 600])
 
+    def test_lines_ending_tangent_on_a_circle(self):
+        # each line leaves its end on the circle in the same direction as the circle does there
+        c = Part.Circle(V(62, -33.5, 0), V(0, 0, 1), 12).toShape()
+        lines = [seg((74, -8), (83, -8)), seg((83, -8), (83, -45.5)), seg((62, -45.5), (83, -45.5)),
+                 seg((74, -8), (74, -33.5))]
+        r = regions.find([(e, i) for i, e in enumerate(lines)] + [(c, 9)])
+        corner = 9 * 37.5 + 144 - math.pi * 36
+        self.assertEqual(sorted(round(x.face.Area, 3) for x in r), [round(corner, 3), round(math.pi * 144, 3)])
+
     def test_keys_survive_moving_curves(self):
         a = {x.key for x in regions.find(rect(0, 0, 40, 20))}
         b = {x.key for x in regions.find(rect(0, 0, 55, 30))}

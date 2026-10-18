@@ -660,11 +660,11 @@ def _selected_components():
     return move._components_of()
 
 
-def new_component():
-    """From the selected bodies (and the sketches only they use), else an empty one that becomes
-    the active component."""
+def new_component(bodies=None):
+    """From the given or selected bodies (and the sketches only they use), else an empty one
+    that becomes the active component."""
     doc = App.ActiveDocument
-    bodies = _selected_bodies()
+    bodies = _selected_bodies() if bodies is None else list(bodies)
     with commands.transaction("New component", doc):
         comp = components.new_component(doc, bodies)
         model.commit(doc)

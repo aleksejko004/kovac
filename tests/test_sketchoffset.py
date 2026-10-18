@@ -73,6 +73,22 @@ class SketchOffsetTests(unittest.TestCase):
         rounded = sketchoffset.offset(self.rect(), 3) + sketchoffset.offset(self.rect(), -3)
         self.assertEqual(sum(isinstance(g, Part.ArcOfCircle) for g in rounded), 4)   # round: the outside one has 4 arcs
 
+    def test_lines_drawn_either_way_go_to_one_side_set_by_the_first_pick(self):
+        import itertools
+        p = [V(0, 0, 0), V(10, -4, 0), V(40, -4, 0), V(40, -24, 0), V(10, -24, 0), V(0, -28, 0)]
+        shape = Part.Face(Part.makePolygon(p + [p[0]]))
+        for flips in itertools.product((False, True), repeat=6):
+            geos = [Part.LineSegment(p[(i + 1) % 6], p[i]) if f else Part.LineSegment(p[i], p[(i + 1) % 6])
+                    for i, f in enumerate(flips)]
+            first = geos[0]
+            side = (first.EndPoint - first.StartPoint).cross(V(0, 0, 1))     # where d > 0 moves the first line
+            inward = shape.isInside(first.value(0.5 * (first.FirstParameter + first.LastParameter)) + side.normalize(),
+                                    1e-6, True)
+            for corners in sketchoffset.CORNERS:
+                out = sketchoffset.offset(geos, 1, corners)
+                sides = {shape.isInside(g.value(0.5 * (g.FirstParameter + g.LastParameter)), 1e-6, True) for g in out}
+                self.assertEqual(sides, {inward}, (flips, corners))
+
     def test_sharp_corners_on_a_spline_chain_meet_without_arcs(self):
         ln = Part.LineSegment(V(-20, 0, 0), V(0, 0, 0))
         s = spline(V(0, 0, 0), V(5, 10, 0), V(15, 15, 0), V(25, 15, 0))

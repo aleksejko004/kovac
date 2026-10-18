@@ -248,19 +248,56 @@ def create(doc, proxy, name=None, index=None, **props):
         setattr(fp, k, v)
     if not proxy.state_feature and components.root(doc) is not None:
         components.adopt(fp, components.ref_home(doc, list(props.values())))   # reference geometry
-    insert(doc, fp, index)
+    try:
+        insert(doc, fp, index)
+    except ValueError:
+        doc.removeObject(fp.Name)
+        raise
     return fp
 
 
 def insert(doc, obj, index=None):
+    """Put obj in the history at the rollback marker (or index), never before an item it
+    uses: that would be a loop (the item's own result would feed what it is built from)."""
     h = history(doc)
     its = list(h.Features)
     at = rollback_index(doc) if index is None else index
+    used = [its.index(o) for o in obj.OutList if o in its and o is not obj]
+    if used and max(used) >= at:
+        if index is None and max(used) >= rollback_index(doc):
+            raise ValueError("%s comes after the timeline marker. Move the marker past it first."
+                             % its[max(used)].Label)
+        at = max(used) + 1
     its.insert(at, obj)
     if h.Rollback >= 0 and at <= h.Rollback:
         h.Rollback = h.Rollback + 1      # the new item is active: it sits at the marker
     h.Features = its
     relink(doc)
+
+
+def fix_order(doc):
+    """Repair a history where an item comes before something it uses (made by an older
+    Kovač): it moves to just after the last such thing. Returns a message, or ""."""
+    h = history(doc, create=False)
+    if h is None:
+        return ""
+    its, moved = list(h.Features), []
+    for _ in range(len(its)):
+        bad = next(((i, o) for i, o in enumerate(its)
+                    if any(d in its and its.index(d) > i for d in o.OutList if d is not getattr(o, "Previous", None))),
+                   None)
+        if bad is None:
+            break
+        i, o = bad
+        last = max(its.index(d) for d in o.OutList if d in its and d is not getattr(o, "Previous", None))
+        its.insert(last, its.pop(i))         # after it (the pop moved everything after i down one)
+        moved.append(o.Label)
+    if not moved:
+        return ""
+    h.Features = its
+    relink(doc)
+    return "%s came before what %s built from, so %s moved after it in the timeline." % (
+        ", ".join(moved), "it is" if len(moved) == 1 else "they are", "it" if len(moved) == 1 else "they")
 
 
 def dependencies(obj):
@@ -304,6 +341,9 @@ def remove(doc, obj):
         h.Rollback = h.Rollback - 1
     h.Features = its
     relink(doc)
+    gone = getattr(getattr(obj, "Proxy", None), "removed", None)
+    if gone is not None:                  # what goes with it (a joint step: its joint)
+        gone(obj)
     doc.removeObject(obj.Name)
     sync_bodies(doc, prune=True)
 
@@ -356,7 +396,14 @@ def sync_bodies(doc, prune=False):
 def commit(doc):
     """Recompute, create any bodies the history produced, recompute those (cheap if none);
     then joints follow today's geometry (ADR-0004). Returns what the joints reported."""
-    from kovac import copies, joints
+    from kovac import copies, joints, projection
+    from kovac import sketchtools
+    for sk in [o for o in doc.Objects if o.TypeId.startswith("Sketcher::") and o.ExpressionEngine]:
+        sketchtools.prune_links(sk)                       # a dimension link to a deleted one
+    for note in (fix_order(doc), projection.sync(doc)):   # no loops: history order, projected edges
+        if note:
+            from kovac import commands
+            commands.report(note)
     doc.recompute()
     if copies.freeze(doc):                # independent copies: their snapshot (ADR-0005)
         doc.recompute()

@@ -115,9 +115,9 @@ def run(cid):
 
 
 class _Command:
-    def __init__(self, cid, text, tip, fn, icon, key, active, ends_tools):
+    def __init__(self, cid, text, tip, fn, icon, key, active, ends_tools, in_edit=False):
         self.cid, self.text, self.tip, self.fn, self.icon, self.key, self.active = cid, text, tip, fn, icon, key, active
-        self.ends_tools = ends_tools
+        self.ends_tools, self.in_edit = ends_tools, in_edit
 
     def GetResources(self):
         r = {"MenuText": self.text, "ToolTip": self.tip}
@@ -125,6 +125,8 @@ class _Command:
             r["Pixmap"] = self.icon
         if self.key:
             r["Accel"] = self.key
+        if self.in_edit:          # FreeCAD greys out other commands while a sketch is open
+            r["CmdType"] = "ForEdit"
         return r
 
     def IsActive(self):
@@ -137,10 +139,11 @@ class _Command:
         invoke(self.cid, self.fn)
 
 
-def add(cid, text, tip, fn, icon="", key="", active=None, ends_tools=False):
-    """`ends_tools`: a modelling command, which ends running tools first (started())."""
+def add(cid, text, tip, fn, icon="", key="", active=None, ends_tools=False, in_edit=False):
+    """`ends_tools`: a modelling command, which ends running tools first (started()).
+    `in_edit`: the command also works while a sketch (or other object) is being edited."""
     import FreeCADGui as Gui
-    REGISTRY[cid] = _Command(cid, text, tip, fn, icon, key, active, ends_tools)
+    REGISTRY[cid] = _Command(cid, text, tip, fn, icon, key, active, ends_tools, in_edit)
     Gui.addCommand(cid, REGISTRY[cid])
     return cid
 

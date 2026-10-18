@@ -322,6 +322,61 @@ class Joints(unittest.TestCase):
         p, _ = self.pin_bottom()
         self.assertLess((p - V(30, 20, 10)).Length, 1e-5)
 
+    # ------------------------------------------------------------ the timeline
+    def test_a_joint_is_a_timeline_step(self):
+        j = self.revolute()
+        step = joints.step_of(j)
+        self.assertIsNotNone(step)
+        self.assertIn(step, model.items(self.doc))
+        self.assertEqual(step.Kind, "Joint")
+        self.assertEqual(joints.joint_of(step), j)
+
+    def test_rolling_back_before_the_step_switches_the_joint_off(self):
+        j = self.revolute()
+        h = model.history(self.doc)
+        h.Rollback = model.items(self.doc).index(joints.step_of(j))
+        model.commit(self.doc)
+        self.assertTrue(j.Suppressed)
+        free = App.Placement(V(300, 0, 0), App.Rotation())
+        self.assertTrue(joints.drag(self.doc, self.pin, free))      # nothing holds it now
+        h.Rollback = -1
+        model.commit(self.doc)
+        self.assertFalse(j.Suppressed)
+        self.assertTrue(joints.satisfied(j))                          # back on: it snaps into place again
+        p, _ = self.pin_bottom()
+        self.assertLess((p - V(15, 20, 10)).Length, 1e-5)
+
+    def test_deleting_the_step_deletes_the_joint(self):
+        j = self.revolute()
+        name = j.Name
+        model.remove(self.doc, joints.step_of(j))
+        model.commit(self.doc)
+        self.assertIsNone(self.doc.getObject(name))
+
+    def test_deleting_the_joint_takes_its_step(self):
+        j = self.revolute()
+        step = joints.step_of(j).Name
+        joints.delete(j)
+        model.commit(self.doc)
+        self.assertIsNone(self.doc.getObject(step))
+
+    def test_a_broken_joint_shows_on_its_step(self):
+        j = self.revolute()
+        cut = [o for o in model.items(self.doc) if getattr(o, "Profile", None) == self.hole][0]
+        model.remove(self.doc, cut)
+        model.commit(self.doc)
+        self.assertIn("Missing reference", joints.step_of(j).Status)
+
+    def test_older_joints_get_a_step(self):
+        j = self.revolute()
+        step = joints.step_of(j)
+        h = model.history(self.doc)
+        h.Features = [o for o in h.Features if o is not step]          # as made before joints had steps
+        self.doc.removeObject(step.Name)
+        model.relink(self.doc)
+        model.commit(self.doc)
+        self.assertIsNotNone(joints.step_of(j))
+
     # ------------------------------------------------------------ limits and driving
     def test_revolute_position_reads_and_drives(self):
         j = self.revolute()

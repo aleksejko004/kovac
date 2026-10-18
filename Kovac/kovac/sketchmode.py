@@ -100,7 +100,9 @@ def start(then=None):
             if _is_datum_plane(s.Object):         # picked in the view it comes with "Face1"
                 return create(base=s.Object.Name, then=then)
             if _face_plane(s.Object, sub) is not None and model.pick_ref(s.Object, sub):
-                return create(base=model.pick_ref(s.Object, sub), then=then)
+                from kovac import components
+                return create(base=model.pick_ref(s.Object, sub), then=then,
+                              project=components.resolve(s.Object, sub))
     PlanePicker(then)
     overview(fit=True)                    # all three origin planes in sight
 
@@ -208,8 +210,9 @@ class PlanePicker:
                 return True
             if _face_plane(obj, sub) is not None and model.pick_ref(obj, sub):
                 ref = model.pick_ref(obj, sub)
+                from kovac import components
                 self.cancel()
-                create(base=ref, then=self.then)
+                create(base=ref, then=self.then, project=components.resolve(obj, sub))
                 return True
         name = self.plane_at(it, pos)
         if name is None:
@@ -238,8 +241,10 @@ class PlanePicker:
         self.esc.deleteLater()
 
 
-def create(base="XY", name="Sketch", then=None):
-    """One undo step: hidden plane + sketch at the rollback marker; then edit it."""
+def create(base="XY", name="Sketch", then=None, project=None):
+    """One undo step: hidden plane + sketch at the rollback marker; then edit it. project:
+    (body, face) the sketch sits on, whose outline is projected into it (to snap to, and to
+    split what is drawn into regions)."""
     doc = App.ActiveDocument
     view = Gui.activeView()
     with commands.transaction("Create sketch", doc):
@@ -252,6 +257,9 @@ def create(base="XY", name="Sketch", then=None):
         from kovac import components
         components.adopt(sk, components.holder(plane) if components.root(doc) else None)
         model.insert(doc, sk)
+        if project is not None:
+            from kovac import projection
+            projection.project(sk, *project)
         model.commit(doc)
     edit(sk, view)
     if then:
@@ -273,6 +281,13 @@ def edit(sk, view=None):
         if vo is not None and hasattr(vo, prop):
             setattr(vo, prop, False)
     sketchtools.install()
+    sketchtools._state["dims"][sk.Name] = len(sk.Constraints)
+    # no modal value dialog after a new dimension: Kovač's own box keeps the view clickable
+    sketcher = App.ParamGet("User parameter:BaseApp/Preferences/Mod/Sketcher")
+    sketcher.SetBool("ShowDialogOnDistanceConstraint", False)
+    # a constraint a tool adds that duplicates others (a vertical between two pinned points)
+    # is dropped at once instead of leaving the sketch unable to regenerate
+    sketcher.SetBool("AutoRemoveRedundants", True)
     Gui.ActiveDocument.setEdit(sk.Name)
     _ui["sketch"] = sk.Name
     show_bar(True)
@@ -285,6 +300,12 @@ def finish():
     gd = Gui.ActiveDocument
     name = _ui.pop("sketch", None)
     if gd is not None and gd.getInEdit() is not None:
+        if in_sketch():
+            # end the running tool while the sketch is still open: left to the sketcher's own
+            # close, the dimension tool takes back its provisional dimension mid-close and
+            # FreeCAD crashes
+            Gui.runCommand("Sketcher_StopOperation")
+            QtWidgets.QApplication.processEvents()
         gd.resetEdit()
     show_bar(False)
     sketchtools.stop()

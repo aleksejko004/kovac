@@ -432,7 +432,7 @@ def remove(comp):
         except Exception:
             o1 = o2 = None
         if o1 is None or o1.comp in gone or o2.comp in gone:
-            doc.removeObject(j.Name)
+            joints.delete(j)
     for g in joints.grounds(doc):
         if g.ObjectToGround in gone:
             doc.removeObject(g.Name)

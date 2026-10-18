@@ -409,11 +409,11 @@ def _sketch_grid(vo, s):
 
 def _points(sk):
     """Points worth landing on: ends of lines and arcs, their midpoints, centres, free points,
-    the origin. A curve's midpoint here is the midpoint of its two endpoints (what Midpoint
+    the origin, the same on projected geometry. A curve's midpoint here is the midpoint of its two endpoints (what Midpoint
     constrains to), not a point on the curve itself -- the same thing for a line, the chord's
     middle for an arc."""
     out = [V(0, 0, 0)]
-    for g in sk.Geometry:
+    for g in list(sk.Geometry) + list(getattr(sk, "ExternalGeo", []))[2:]:
         for attr in ("StartPoint", "EndPoint", "Center"):
             if hasattr(g, attr):
                 out.append(getattr(g, attr))

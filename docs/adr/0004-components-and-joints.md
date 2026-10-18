@@ -145,9 +145,10 @@ Writing all joint origins from references takes about 1.3 ms per joint, once per
 - Tests: `tests/test_components.py` (16 headless tests) and GUI segment `assembly`.
 
 Deviations from the decision above:
-- **Joints are not in the timeline yet.** Creating or editing a joint is one undo step, and joints
-  are listed in the browser. Making them timeline items needs the history to hold non-geometry
-  items; that comes later.
+- **Joints are timeline steps** (`joints.JointStep`, a history item that changes no body). Rolled
+  back before its step, or with the step suppressed, a joint is off and its parts move freely;
+  deleting the step deletes the joint; double-clicking it opens the Joint panel; a joint's
+  problem shows on its step. Creating or editing a joint is still one undo step.
 - **No nested components yet.** New components always sit at the top of the design.
 - **Sketches don't move with their bodies** between components: they stay where they were
   drawn, and the features built on them compute as before. A body with joints can't move to

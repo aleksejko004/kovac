@@ -30,14 +30,37 @@ class Region:
         return "Region(%s, area=%.3f)" % (self.key, self.face.Area)
 
 
-def sketch_curves(sketch):
-    """[(edge in sketch-local coordinates, geometry id)] for non-construction curves."""
+def sketch_curves(sketch, projected=True):
+    """[(edge in sketch-local coordinates, geometry id)] for non-construction curves, then (with
+    projected) the projected ones, ids -3, -4, ...: what the sketch shows of the body it sits
+    on, which splits what is drawn into more regions to pick."""
     out = []
     for i, g in enumerate(sketch.Geometry):
         if sketch.getConstruction(i) or isinstance(g, Part.Point):
             continue
         out.append((g.toShape(), sketch.getGeometryId(i)))
+    for k, g in enumerate(list(getattr(sketch, "ExternalGeo", []))[2:] if projected else []):   # after the two axes
+        if not isinstance(g, Part.Point):
+            out.append((g.toShape(), -3 - k))
     return out
+
+
+def _projected(key):
+    return key.startswith("-")
+
+
+def _doubled(piece, own):
+    """True if piece lies along one of the drawn pieces (a projected edge traced over)."""
+    pts = [piece.Vertexes[0].Point, piece.Vertexes[-1].Point,
+           piece.valueAt((piece.FirstParameter + piece.LastParameter) / 2)]
+    box = piece.BoundBox
+    box.enlarge(1e-6)                     # a straight edge along an axis has a flat box
+    for o in own:
+        if not box.intersect(o.BoundBox):
+            continue
+        if all(o.distToShape(Part.Vertex(p))[0] < 1e-6 for p in pts):
+            return True
+    return False
 
 
 def placement(sketch, local=False):
@@ -70,7 +93,8 @@ def _pieces(curves):
         parts = [p for p in parts if p.ShapeType == "Edge"] or [orig]
         parts.sort(key=lambda p: orig.Curve.parameter(p.valueAt((p.FirstParameter + p.LastParameter) / 2)))
         out += [(p, "%s.%d" % (key, k)) for k, p in enumerate(parts)]
-    return out
+    own = [p for p, k in out if not _projected(k)]
+    return [(p, k) for p, k in out if not (_projected(k) and _doubled(p, own))]
 
 
 def _vkey(p):
@@ -79,6 +103,24 @@ def _vkey(p):
 
 def _angle(d):
     return math.atan2(d.y, d.x)
+
+
+def _bend(e, u, d):
+    """Signed curvature of edge e at parameter u, leaving along d: > 0 bends left."""
+    if isinstance(e.Curve, (Part.Line, Part.LineSegment)):
+        return 0.0
+    try:
+        k, n = e.curvatureAt(u), e.normalAt(u)
+    except Part.OCCError:
+        return 0.0
+    return math.copysign(k, d.x * n.y - d.y * n.x) if k > TOL else 0.0
+
+
+def _order(d, bend):
+    """Sort key of a half-edge around its vertex: by direction, and where two leave in the same
+    direction (a line ending tangent on a curve), the one bending right comes first."""
+    a = round(_angle(d), 9)
+    return (math.pi if a <= -math.pi else a), bend
 
 
 def _poly(halfedges):
@@ -109,8 +151,8 @@ def find(curves):
     for e, key in pieces:
         a, b = e.Vertexes[0].Point, e.Vertexes[-1].Point
         ta, tb = e.tangentAt(e.FirstParameter), e.tangentAt(e.LastParameter)
-        out.setdefault(_vkey(a), []).append(((e, True, key), _angle(ta), _vkey(b)))
-        out.setdefault(_vkey(b), []).append(((e, False, key), _angle(-tb), _vkey(a)))
+        out.setdefault(_vkey(a), []).append(((e, True, key), _order(ta, _bend(e, e.FirstParameter, ta)), _vkey(b)))
+        out.setdefault(_vkey(b), []).append(((e, False, key), _order(-tb, _bend(e, e.LastParameter, -tb)), _vkey(a)))
     # prune dangling curves (vertices of degree 1), repeatedly
     changed = True
     while changed:
@@ -160,8 +202,9 @@ def find(curves):
     return regions
 
 
-def of_sketch(sketch, local=False):
-    """Regions of a sketch in global coordinates, or (local) in its component's."""
+def of_sketch(sketch, local=False, projected=True):
+    """Regions of a sketch in global coordinates, or (local) in its component's; without
+    projected, of what is drawn alone."""
     pl = placement(sketch, local)
     out = []
     m = pl.toMatrix()
@@ -170,7 +213,7 @@ def of_sketch(sketch, local=False):
         c = shape.copy()
         c.transformShape(m)
         return c
-    for r in find(sketch_curves(sketch)):
+    for r in find(sketch_curves(sketch, projected)):
         out.append(Region(moved(r.face), r.key, pl.multVec(r.point), r.edge_keys,
                           [(moved(e), k) for e, k in r.pieces]))
     return out
@@ -182,6 +225,13 @@ def default(regions):
         return sum(1 for o in regions if o is not r and o.face.Area > r.face.Area
                    and Part.Face(o.face.OuterWire).isInside(r.point, 1e-7, True))
     return [r for r in regions if depth(r) % 2 == 0]
+
+
+def automatic(sketch, local=False):
+    """Regions used when the user picks none: from what is drawn alone, so a shape drawn on a
+    face extrudes in one click although the face's outline splits it from the rest; when
+    nothing drawn closes an area, from the projected outline too."""
+    return default(of_sketch(sketch, local, projected=False)) or default(of_sketch(sketch, local))
 
 
 def pick(regions, keys, points=()):

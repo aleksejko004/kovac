@@ -277,6 +277,11 @@ def create():
             from kovac import editor, sketchmode
             if o.TypeId.startswith("Sketcher::"):
                 sketchmode.edit(o)
+            elif model.is_feature(o) and o.Kind == "Joint":
+                from kovac import assemble, joints
+                j = joints.joint_of(o)
+                if j is not None:
+                    assemble.edit_joint(j)
             elif model.is_feature(o) and o.Kind in editor.SCHEMAS:
                 editor.edit(o)
 

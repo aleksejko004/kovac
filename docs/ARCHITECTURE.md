@@ -45,6 +45,8 @@ Part / Sketcher / PartDesign / …                         zoom to cursor, click
                                           joints.py     joint origins, snaps, solve check, drag
                                           assemble.py   New Component / Instance, Joint, Drag, Ground
                                           copies.py     linked and independent copies (ADR-0005)
+                                          projection.py projected sketch edges from the body at the sketch's step (no loops)
+                                          export.py   STEP / STL / 3MF export, one file or one per part · exportpanel.py its panel
                                           params.py     named parameters
                                           inspect_tools.py mass properties, interference, section,
                                                         draft analysis, materials panel
