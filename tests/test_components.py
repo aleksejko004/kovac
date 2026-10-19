@@ -136,6 +136,73 @@ class Components(unittest.TestCase):
         model.commit(self.doc)
         self.assertEqual(ex.Status, "")
 
+    def shown(self, body):
+        """Where a body is on screen: its shape in its component's coordinates, placed."""
+        return body.Shape.transformed(components.frame(body).toMatrix()).BoundBox
+
+    def same_box(self, a, b):
+        for k in ("XMin", "YMin", "ZMin", "XMax", "YMax", "ZMax"):
+            self.assertAlmostEqual(getattr(a, k), getattr(b, k), 5, k)
+
+    def test_body_moved_into_another_component_stays_where_it_is_shown(self):
+        plate = self.plate()
+        pin = self.pin()
+        comp = components.new_component(self.doc, [pin], "Pin")
+        comp.Placement = App.Placement(V(0, 0, 50), App.Rotation(V(1, 0, 0), 90))
+        model.commit(self.doc)
+        before = self.shown(plate)
+        components.move_bodies(self.doc, [plate], comp)
+        model.commit(self.doc)
+        self.assertEqual(components.holder(plate), comp)
+        self.same_box(self.shown(plate), before)
+        moves = [o for o in model.items(self.doc) if type(getattr(o, "Proxy", None)).__name__ == "Transform"]
+        self.assertEqual(len(moves), 1)                                  # one history step carries the change
+        self.assertEqual(self.doc.getObject("PlateSketch").getParentGeoFeatureGroup(), None)   # sketches stay put
+        ex = [o for o in model.items(self.doc) if getattr(o, "Profile", None) == self.doc.getObject("PlateSketch")][0]
+        ex.Length = 20                                                   # an upstream edit still flows through
+        model.commit(self.doc)
+        self.assertAlmostEqual(self.shown(plate).ZLength, 20, 5)
+
+    def test_body_into_an_unmoved_component_needs_no_history_step(self):
+        plate = self.plate()
+        comp = components.new_component(self.doc, [], "Empty")
+        components.move_bodies(self.doc, [plate], comp)
+        self.assertEqual(components.holder(plate), comp)
+        self.assertFalse(any(type(getattr(o, "Proxy", None)).__name__ == "Transform" for o in model.items(self.doc)))
+
+    def test_deleting_a_moved_component_keeps_its_bodies_in_place(self):
+        self.plate()
+        pin = self.pin()
+        comp = components.new_component(self.doc, [pin], "Pin")
+        comp.Placement = App.Placement(V(10, 0, 50), App.Rotation(V(0, 1, 0), 30))
+        model.commit(self.doc)
+        before = self.shown(pin)
+        note = components.remove(comp)
+        model.commit(self.doc)
+        self.assertIn("sketches go back", note)                         # the pin's sketch was in it
+        self.assertIsNone(components.holder(pin))
+        self.same_box(self.shown(pin), before)
+
+    def test_copy_is_a_separate_component_with_its_own_bodies(self):
+        self.plate()
+        pin = self.pin()
+        comp = components.new_component(self.doc, [pin], "Pin")
+        comp.Placement = App.Placement(V(0, 0, 50), App.Rotation())
+        copy = components.copy_component(comp)
+        model.commit(self.doc)
+        new = [b for b in live_bodies(self.doc) if components.holder(b) == copy]
+        self.assertEqual(len(new), 1)
+        self.assertNotEqual(new[0].BodyId, pin.BodyId)
+        self.assertEqual(copy.Label, "Pin copy")
+        self.assertFalse(copy.Placement.isSame(comp.Placement, 1e-6))    # placed beside it
+        self.assertAlmostEqual(new[0].Shape.Volume, pin.Shape.Volume, 6)
+        rim = "Edge%d" % (1 + next(i for i, e in enumerate(new[0].Shape.Edges) if e.BoundBox.ZMin > 29))
+        feature(self.doc, modify.Chamfer, Edges=[topo.dumps(topo.make_ref(model.state_of(new[0].Tip), new[0].BodyId, rim))],
+                Distance=1)
+        model.commit(self.doc)
+        self.assertLess(new[0].Shape.Volume, pin.Shape.Volume - 1e-3)    # the copy changed alone
+        self.assertAlmostEqual(pin.Shape.Volume, 3.141592653589793 * 4.5 ** 2 * 30, 4)
+
     def test_save_and_reopen(self):
         self.plate()
         pin = self.pin()
@@ -254,6 +321,114 @@ class Joints(unittest.TestCase):
         self.assertEqual(model.commit(self.doc), "")
         p, _ = self.pin_bottom()
         self.assertLess((p - V(30, 20, 10)).Length, 1e-5)
+
+    # ------------------------------------------------------------ the timeline
+    def test_a_joint_is_a_timeline_step(self):
+        j = self.revolute()
+        step = joints.step_of(j)
+        self.assertIsNotNone(step)
+        self.assertIn(step, model.items(self.doc))
+        self.assertEqual(step.Kind, "Joint")
+        self.assertEqual(joints.joint_of(step), j)
+
+    def test_rolling_back_before_the_step_switches_the_joint_off(self):
+        j = self.revolute()
+        h = model.history(self.doc)
+        h.Rollback = model.items(self.doc).index(joints.step_of(j))
+        model.commit(self.doc)
+        self.assertTrue(j.Suppressed)
+        free = App.Placement(V(300, 0, 0), App.Rotation())
+        self.assertTrue(joints.drag(self.doc, self.pin, free))      # nothing holds it now
+        h.Rollback = -1
+        model.commit(self.doc)
+        self.assertFalse(j.Suppressed)
+        self.assertTrue(joints.satisfied(j))                          # back on: it snaps into place again
+        p, _ = self.pin_bottom()
+        self.assertLess((p - V(15, 20, 10)).Length, 1e-5)
+
+    def test_deleting_the_step_deletes_the_joint(self):
+        j = self.revolute()
+        name = j.Name
+        model.remove(self.doc, joints.step_of(j))
+        model.commit(self.doc)
+        self.assertIsNone(self.doc.getObject(name))
+
+    def test_deleting_the_joint_takes_its_step(self):
+        j = self.revolute()
+        step = joints.step_of(j).Name
+        joints.delete(j)
+        model.commit(self.doc)
+        self.assertIsNone(self.doc.getObject(step))
+
+    def test_a_broken_joint_shows_on_its_step(self):
+        j = self.revolute()
+        cut = [o for o in model.items(self.doc) if getattr(o, "Profile", None) == self.hole][0]
+        model.remove(self.doc, cut)
+        model.commit(self.doc)
+        self.assertIn("Missing reference", joints.step_of(j).Status)
+
+    def test_older_joints_get_a_step(self):
+        j = self.revolute()
+        step = joints.step_of(j)
+        h = model.history(self.doc)
+        h.Features = [o for o in h.Features if o is not step]          # as made before joints had steps
+        self.doc.removeObject(step.Name)
+        model.relink(self.doc)
+        model.commit(self.doc)
+        self.assertIsNotNone(joints.step_of(j))
+
+    # ------------------------------------------------------------ limits and driving
+    def test_revolute_position_reads_and_drives(self):
+        j = self.revolute()
+        ang, _ = joints.position(j)
+        self.assertAlmostEqual(ang, 0, 6)                       # as jointed
+        self.assertTrue(joints.set_position(self.doc, j, angle=30))
+        self.assertAlmostEqual(joints.position(j)[0], 30, 5)
+        self.assertTrue(joints.satisfied(j))
+        p, _ = self.pin_bottom()
+        self.assertLess((p - V(15, 20, 10)).Length, 1e-5)       # turned in place
+
+    def test_angle_limits_hold_driving_and_dragging(self):
+        j = self.revolute()
+        joints.set_limits(j, angle=(-20, 45))
+        joints.set_position(self.doc, j, angle=80)
+        self.assertAlmostEqual(joints.position(j)[0], 45, 5)    # stops at the limit
+        a, _ = joints.global_frames(j)
+        z = a.Rotation.multVec(V(0, 0, 1))
+        far = App.Placement(V(), App.Rotation(z, -120), a.Base).multiply(self.pin.Placement)
+        held = joints.clamp(j, self.pin, far)                   # a drag past the other limit
+        self.pin.Placement = held
+        self.assertAlmostEqual(joints.position(j)[0], -20, 5)
+        self.assertTrue(joints.satisfied(j))
+
+    def test_out_of_limits_drag_is_refused(self):
+        j = self.revolute()
+        joints.set_limits(j, angle=(-10, 10))
+        before = App.Placement(self.pin.Placement)
+        a, _ = joints.global_frames(j)
+        z = a.Rotation.multVec(V(0, 0, 1))
+        self.assertFalse(joints.drag(self.doc, self.pin, App.Placement(V(), App.Rotation(z, 60), a.Base).multiply(before)))
+        self.assertTrue(self.pin.Placement.isSame(before, 1e-7))
+
+    def test_slider_slide_limits(self):
+        j = self.revolute("Slider")
+        joints.set_limits(j, slide=(0, 12))
+        joints.set_position(self.doc, j, slide=20)
+        self.assertAlmostEqual(joints.position(j)[1], 12, 5)
+        self.assertTrue(joints.satisfied(j))
+        joints.set_limits(j, slide=None)                        # limits off again
+        joints.set_position(self.doc, j, slide=20)
+        self.assertAlmostEqual(joints.position(j)[1], 20, 5)
+
+    def test_limits_survive_save_and_reopen(self):
+        j = self.revolute()
+        joints.set_limits(j, angle=(-5, 50))
+        path = os.path.join(tempfile.mkdtemp(), "l.FCStd")
+        self.doc.saveAs(path)
+        name = j.Name
+        App.closeDocument(self.doc.Name)
+        self.doc = App.openDocument(path)
+        self.assertEqual(joints.limits(self.doc.getObject(name)), {"angle": (-5.0, 50.0), "slide": None})
 
 
 if __name__ == "__main__":

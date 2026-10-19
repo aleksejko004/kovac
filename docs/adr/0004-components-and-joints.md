@@ -133,12 +133,27 @@ Writing all joint origins from references takes about 1.3 ms per joint, once per
   place, the solve check, ground and drag.
 - `assemble.py`: the Assemble ribbon group (New Component, New Instance, Joint, Drag, Ground).
 - `move.py`: Move with "Components".
+- Moving bodies between components (`components.move_bodies`, browser "Move to"): a Move step
+  by the fixed difference between the two components' placements keeps them where they are
+  shown; deleting a moved component uses the same step. Copy Component (`copy_component`): a
+  history step that copies the bodies into a new component.
+- Joint limits and driving (`joints.position`, `set_limits`, `set_position`, `clamp`): a turning
+  or sliding joint's position is side 2's frame against side 1's, counted from the jointed
+  position. Limits are Kovač's own properties (FreeCAD's limit properties stay off, its solver
+  counts from another zero); the solve check rejects positions outside them, Drag clamps to
+  them, and the Joint panel types, limits and plays the position.
 - Tests: `tests/test_components.py` (16 headless tests) and GUI segment `assembly`.
 
 Deviations from the decision above:
-- **Joints are not in the timeline yet.** Creating or editing a joint is one undo step, and joints
-  are listed in the browser. Making them timeline items needs the history to hold non-geometry
-  items; that comes later.
+- **Joints are timeline steps** (`joints.JointStep`, a history item that changes no body). Rolled
+  back before its step, or with the step suppressed, a joint is off and its parts move freely;
+  deleting the step deletes the joint; double-clicking it opens the Joint panel; a joint's
+  problem shows on its step. Creating or editing a joint is still one undo step.
 - **No nested components yet.** New components always sit at the top of the design.
+- **Sketches don't move with their bodies** between components: they stay where they were
+  drawn, and the features built on them compute as before. A body with joints can't move to
+  another component (its joints would have to follow it); delete the joints first.
+- **A copy follows edits made before the copy step** (it is made from the original's history),
+  like any copied body; features added to either one afterwards change only that one.
 - **A seam is not a snap point.** A round face's seam edge, and the seam vertex of a circle, offer
   their face's snaps (axis, rim centres) instead of points nobody means to pick.

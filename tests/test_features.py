@@ -178,6 +178,88 @@ class Features(unittest.TestCase):
         self.assertAlmostEqual(sk.Geometry[pt].X, 8.0, 6)    # the point follows its new midpoint
         self.assertAlmostEqual(sk.Geometry[pt].Y, 0.0, 6)
 
+    def test_matching_dimensions(self):
+        import Sketcher
+        from kovac import sketchtools
+        sk = self.doc.addObject("Sketcher::SketchObject", "Dims")
+        a = sk.addGeometry(Part.LineSegment(V(0, 0, 0), V(20, 0, 0)), False)
+        b = sk.addGeometry(Part.LineSegment(V(0, 10, 0), V(-35, 10, 0)), False)
+        c = sk.addGeometry(Part.Circle(V(50, 0, 0), V(0, 0, 1), 4), False)
+        da = sk.addConstraint(Sketcher.Constraint("Distance", a, 20.0))
+        db = sk.addConstraint(Sketcher.Constraint("DistanceX", b, 1, b, 2, -35.0))     # points left: negative
+        dc = sk.addConstraint(Sketcher.Constraint("Diameter", c, 8.0))
+        ang = sk.addConstraint(Sketcher.Constraint("Angle", a, b, 3.0))
+        self.doc.recompute()
+        self.assertEqual(sketchtools.match_dimension(sk, da, db), "")
+        self.assertEqual(sketchtools.match_dimension(sk, da, dc), "")
+        self.doc.recompute()
+        dx = lambda: sk.Geometry[b].EndPoint.x - sk.Geometry[b].StartPoint.x      # noqa: E731
+        self.assertAlmostEqual(dx(), -20, 6)                             # still pointing left
+        self.assertAlmostEqual(sk.Geometry[c].Radius, 10, 6)            # a diameter equal to the length
+        sk.setDatum(da, 30.0)                                            # and they follow later edits
+        self.doc.recompute()
+        self.assertAlmostEqual(dx(), -30, 6)
+        self.assertAlmostEqual(sk.Geometry[c].Radius, 15, 6)
+        self.assertIn("angle", sketchtools.match_dimension(sk, da, ang))
+        self.assertIn("follows", sketchtools.match_dimension(sk, db, da))   # no loop
+        self.assertTrue(sketchtools.match_dimension(sk, da, da))
+
+    def test_matched_dimensions_survive_deleting_constraints(self):
+        import Sketcher
+        from kovac import sketchtools
+        sk = self.doc.addObject("Sketcher::SketchObject", "Links")
+        lines = [sk.addGeometry(Part.LineSegment(V(0, 5 * k, 0), V(10 + k, 5 * k, 0)), False) for k in range(3)]
+        d = [sk.addConstraint(Sketcher.Constraint("Distance", g, 10.0 + g)) for g in lines]
+        self.doc.recompute()
+        self.assertEqual(sketchtools.match_dimension(sk, d[1], d[2]), "")
+        sk.delConstraint(d[0])                         # an earlier one goes: the link stays on its two
+        sketchtools.prune_links(sk)
+        self.doc.recompute()
+        sk.setDatum(0, 15.0)
+        self.doc.recompute()
+        self.assertEqual([round(c.Value, 6) for c in sk.Constraints], [15, 15])
+        self.assertIn("Up-to-date", sk.State)
+        sk.delConstraint(0)                            # the source goes: the other keeps its value
+        sketchtools.prune_links(sk)
+        self.doc.recompute()
+        self.assertEqual(sk.ExpressionEngine, [])
+        self.assertEqual([round(c.Value, 6) for c in sk.Constraints], [15])
+        self.assertIn("Up-to-date", sk.State)
+
+    def test_a_stale_numbered_link_in_a_file_is_dropped(self):
+        import Sketcher
+        from kovac import sketchtools
+        sk = self.doc.addObject("Sketcher::SketchObject", "Old")
+        for k in range(2):
+            g = sk.addGeometry(Part.LineSegment(V(0, 5 * k, 0), V(10, 5 * k, 0)), False)
+            sk.addConstraint(Sketcher.Constraint("Distance", g, 10.0))
+        sk.setExpression(".Constraints[1]", ".Constraints[0]")      # by number, as an earlier Kovač made it
+        self.doc.recompute()
+        sk.delConstraint(0)                                         # now it points past the end
+        sketchtools.prune_links(sk)
+        self.assertEqual(sk.ExpressionEngine, [])
+        self.doc.recompute()
+        self.assertIn("Up-to-date", sk.State)
+
+    def test_typed_dimension_values(self):
+        import Sketcher
+        from kovac import sketchtools
+        sk = self.doc.addObject("Sketcher::SketchObject", "Typed")
+        a = sk.addGeometry(Part.LineSegment(V(0, 0, 0), V(20, 0, 0)), False)
+        b = sk.addGeometry(Part.LineSegment(V(0, 10, 0), V(-35, 10, 0)), False)
+        da = sk.addConstraint(Sketcher.Constraint("Distance", a, 20.0))
+        db = sk.addConstraint(Sketcher.Constraint("DistanceX", b, 1, b, 2, -35.0))
+        ang = sk.addConstraint(Sketcher.Constraint("Angle", a, b, 3.0))
+        self.doc.recompute()
+        self.assertIn("35", sketchtools.value_text(sk, db))              # shown without the sign
+        sketchtools.set_value(sk, da, "25")                              # a bare number is mm
+        sketchtools.set_value(sk, db, "1 in")
+        sketchtools.set_value(sk, ang, "170°")
+        self.doc.recompute()
+        self.assertAlmostEqual(sk.Geometry[a].length(), 25, 6)
+        self.assertAlmostEqual(sk.Geometry[b].EndPoint.x - sk.Geometry[b].StartPoint.x, -25.4, 6)   # still to the left
+        self.assertAlmostEqual(sk.Constraints[ang].Value, math.radians(170), 6)
+
     def test_snap_candidates_include_midpoints(self):
         from kovac import grid
         sk = self.doc.addObject("Sketcher::SketchObject", "SnapPts")

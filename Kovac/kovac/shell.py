@@ -26,10 +26,10 @@ GROUPS = {
                           ["Kovac_Combine", "Kovac_Split"], ["Kovac_Scale", "Kovac_Mirror"],
                           ["Kovac_PatternRect", "Kovac_PatternCirc"]]),
                ("Reference", [["Kovac_Plane", "Kovac_Axis", "Kovac_Point"]]),
-               ("Assemble", [["Kovac_NewComponent", "Kovac_NewInstance"], "Kovac_Joint", "Kovac_DragComponent", "Kovac_Ground"]),
+               ("Assemble", [["Kovac_NewComponent", "Kovac_NewInstance", "Kovac_CopyComponent"], "Kovac_Joint", "Kovac_DragComponent", "Kovac_Ground"]),
                ("Check", ["Kovac_Measure", ["Kovac_MassProperties", "Kovac_Interference", "Kovac_Section", "Kovac_DraftAnalysis"]]),
                ("Model", ["Kovac_Parameters", "Kovac_Material"]),
-               ("Bring in", [["Kovac_ImportStep", "Kovac_ExportStep"]]),
+               ("Bring in", [["Kovac_ImportStep", "Kovac_Export"]]),
                ("Select", ["Kovac_SelectTangent", ["Kovac_SaveSelectionSet", "Kovac_RestoreSelectionSet"]])],
     "Drawing": [("Create", ["Kovac_NewDrawing", "Kovac_BaseView", "Kovac_ProjectedView", "Kovac_SectionView", "Kovac_DetailView"]),
                 ("Annotate", ["Kovac_DrawDimension", "Kovac_HoleCallouts", "Kovac_Balloon"]),
@@ -100,13 +100,9 @@ def import_step(path, doc=None):
     return doc
 
 
-def _export_step():
-    doc = App.ActiveDocument
-    objs = [s.Object for s in Gui.Selection.getSelectionEx()] or [o for o in doc.Objects if _is_body(o)]
-    path, _ = QtWidgets.QFileDialog.getSaveFileName(Gui.getMainWindow(), "Export STEP", doc.Name + ".step", "STEP (*.step *.stp)")
-    if path:
-        import Import
-        Import.export(objs, path)
+def _export():
+    from kovac import exportpanel
+    exportpanel.open_panel()
 
 
 def _is_body(o):
@@ -198,6 +194,30 @@ def _left_drag(kind):
     return run
 
 
+def _can_step(cid):
+    def active():
+        doc = App.ActiveDocument
+        return bool(commands._running) or (doc is not None and (doc.UndoCount if cid == "Std_Undo" else doc.RedoCount) > 0)
+    return active
+
+
+def _take_step_keys():
+    """Undo and Redo keys move from FreeCAD's commands to ours (two actions on one key fire
+    neither); ours sit on the main window too, so the keys work wherever the bars are hidden."""
+    mw = Gui.getMainWindow()
+    for cid in ("Std_Undo", "Std_Redo"):
+        stock = Gui.Command.get(cid)
+        key = stock.getShortcut() if stock else ""
+        for a in (stock.getAction() if stock else []):
+            a.setShortcut(QtGui.QKeySequence())
+        for a in _actions(cid.replace("Std_", "Kovac_")):
+            if key:
+                a.setShortcut(QtGui.QKeySequence(key))
+                a.setToolTip("%s  (%s)" % (a.text(), key))
+            if a not in mw.actions():
+                mw.addAction(a)
+
+
 def _toggle_advanced():
     kovac.prefs().SetBool("Advanced", not advanced())
     apply_visibility()
@@ -242,7 +262,11 @@ def register():
     add("Kovac_NewDesign", "New design", "Start a new design", _lazy("startpage", "new_design"),
         key="Ctrl+N")
     add("Kovac_ImportStep", "Import STEP…", "Bring a STEP model into the design", _import_step, icon=kovac.icon("import_step"))
-    add("Kovac_ExportStep", "Export STEP…", "Export the selected (or all) bodies as STEP", _export_step, active=commands.has_doc)
+    add("Kovac_Export", "Export…", "Export the selected bodies or components (or everything shown) as STEP, STL or 3MF: "
+        "one file, or one per part", _export, icon=kovac.icon("export"), active=commands.has_doc)
+    for cid, text, icon in (("Std_Undo", "Undo", "edit-undo"), ("Std_Redo", "Redo", "edit-redo")):
+        add(cid.replace("Std_", "Kovac_"), text, "%s the last step; while a tool is running, leave the tool instead" % text,
+            lambda c=cid: commands.step(c), icon=icon, active=_can_step(cid), in_edit=True)
     add("Kovac_Start", "Start page", "Show the start page", _lazy("startpage", "create"))
     add("Kovac_About", "About Kovač", "Version and credits", about)
     add("Kovac_Advanced", "Advanced / Expert", "Show or hide FreeCAD's own workbenches, menus and panels", _toggle_advanced)
@@ -437,7 +461,7 @@ def build_ui():
     app = _toolbar("kovacAppBar")
     menu_btn = QtWidgets.QToolButton(text="☰", toolTip="Menu", popupMode=QtWidgets.QToolButton.InstantPopup)
     menu = QtWidgets.QMenu(menu_btn)
-    for cid in ("Kovac_NewDesign", "Std_Open", "Kovac_ImportStep", "Std_Save", "Std_SaveAs", "Kovac_ExportStep",
+    for cid in ("Kovac_NewDesign", "Std_Open", "Kovac_ImportStep", "Std_Save", "Std_SaveAs", "Kovac_Export",
                 None, "Kovac_Start", "Std_DlgPreferences", "Kovac_Theme", "Kovac_Advanced", None, "Kovac_About", "Std_Quit"):
         if cid is None:
             menu.addSeparator()
@@ -446,7 +470,8 @@ def build_ui():
                 menu.addAction(a)
     menu_btn.setMenu(menu)
     app.addWidget(menu_btn)
-    for cid in ("Std_Save", "Std_Undo", "Std_Redo"):
+    _take_step_keys()
+    for cid in ("Std_Save", "Kovac_Undo", "Kovac_Redo"):
         for a in _actions(cid):
             app.addAction(a)
     spacer = QtWidgets.QWidget()
@@ -581,6 +606,9 @@ class AutoRecompute:
         if any("Touched" in o.State for o in doc.Objects):
             from kovac import model
             model.commit(doc)
+            # The regeneration's own changes don't call for another; an object that failed
+            # (a sketch with a redundant constraint) stays touched until the user edits it.
+            self.timer.stop()
 
 
 # ---------------------------------------------------------------- workbench hooks
@@ -638,7 +666,15 @@ def arrange():
     area = QtCore.Qt.TopToolBarArea
     sketch = mw.findChild(QtWidgets.QToolBar, "kovacSketchBar")
     order = _ui["bars"][:1] + [None] + _ui["bars"][1:] + [tb for m in MODES for tb in _ui["groups"][m]] + ([sketch] if sketch else [])
-    shown = {tb: tb.isVisible() for tb in order if tb is not None}
+    # what shows follows Kovač's state, not the restored layout: a profile saved while a
+    # sketch was open has the mode button and the ribbon hidden
+    from kovac import sketchmode
+    sketching = sketchmode.in_sketch()
+    shown = {tb: False for tb in order if tb is not None}
+    shown.update({tb: True for tb in _ui["bars"][:1]})
+    shown.update({tb: not sketching for tb in _ui["bars"][1:] + _ui["groups"].get(mode(), [])})
+    if sketch:
+        shown[sketch] = sketching
     for tb in shown:
         mw.removeToolBarBreak(tb)
     for tb in order:

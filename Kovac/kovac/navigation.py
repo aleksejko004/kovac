@@ -69,6 +69,31 @@ def camera_focus(cam):
     return pos3 - rot.multVec(V(0, 0, 1)) * cam.focalDistance.getValue()
 
 
+def _constraint_under():
+    """Index of the constraint of the edited sketch under the cursor (preselected), or None."""
+    from kovac import sketchtools
+    sk = sketchtools._edited_sketch()
+    try:
+        pre = Gui.Selection.getPreselection()
+        names = pre.SubElementNames if sk is not None and pre.Object is sk else ()
+    except Exception:
+        return None
+    return next((int(n[len("Constraint"):]) - 1 for n in names if n.startswith("Constraint")), None)
+
+
+def _selected_dimensions():
+    """Indexes of the dimensions selected in the sketch being edited."""
+    from kovac import sketchtools
+    sk = sketchtools._edited_sketch()
+    if sk is None:
+        return []
+    out = []
+    for sel in Gui.Selection.getSelectionEx(sk.Document.Name):
+        if sel.Object is sk:
+            out += [int(n[len("Constraint"):]) - 1 for n in sel.SubElementNames if n.startswith("Constraint")]
+    return [i for i in out if 0 <= i < len(sk.Constraints) and sk.Constraints[i].Type in sketchtools.DIMENSIONS]
+
+
 class Band(QtWidgets.QWidget):
     """Window (solid accent) vs crossing (dashed green) rectangle."""
 
@@ -295,6 +320,13 @@ class Interactor(QtCore.QObject):
                 return False
             if t == QtCore.QEvent.Drop:
                 return self.drop_material(ev)
+            if t == QtCore.QEvent.MouseButtonPress:
+                self.dims_before = _selected_dimensions()      # before this click changes the selection
+                from kovac import sketchtools
+                box = sketchtools.open_box()
+                if box is not None and ev.button() == QtCore.Qt.LeftButton \
+                        and box.press(_constraint_under(), ev.position().toPoint()):
+                    return True
             if t in (QtCore.QEvent.MouseMove, QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonRelease) \
                     and self.snap_sketch(ev):
                 return True
@@ -469,6 +501,8 @@ class Interactor(QtCore.QObject):
         if ev.button() == QtCore.Qt.MiddleButton:          # double middle click: fit everything
             Gui.activeView().fitAll()
             return True
+        if ev.button() == QtCore.Qt.LeftButton and not _mods(ev) and self.match_dimension():
+            return True
         if in_edit() or ev.button() != QtCore.Qt.LeftButton:
             return False
         info = self.info_at(ev.position().toPoint())
@@ -485,6 +519,30 @@ class Interactor(QtCore.QObject):
         prefix = sub[:-len(element)]
         for i in chain:
             Gui.Selection.addSelection(obj.Document.Name, obj.Name, "%s%s%d" % (prefix, element[:4], i))
+        return True
+
+    def match_dimension(self):
+        """In a sketch, with a dimension selected, a double click on another one makes it equal
+        the selected one (instead of opening its value)."""
+        from kovac import commands, sketchtools
+        sk = sketchtools._edited_sketch()
+        before = getattr(self, "dims_before", [])
+        if sk is None or not before:
+            return False
+        under = [i for i in (_constraint_under(),) if i is not None]
+        new = [i for i in _selected_dimensions() if i not in before]     # what the first click picked
+        target = (under or new or [None])[0]
+        sources = [i for i in before if i != target]
+        if target is None or not sources or not 0 <= target < len(sk.Constraints) \
+                or sk.Constraints[target].Type not in sketchtools.DIMENSIONS:
+            return False
+        with commands.transaction("Equal dimensions", sk.Document):
+            why = sketchtools.match_dimension(sk, sources[-1], target)
+        if why:
+            commands.report("Equal: %s." % why)
+        else:
+            commands.report("The dimension now equals the selected one.", error=False)
+        self.dims_before = []
         return True
 
     # ------------------------------------------------------------ selection

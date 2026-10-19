@@ -16,7 +16,7 @@ from kovac import commands, palette
 R_OUT, R_IN, PAD = 112, 28, 6
 TRAIL_S = 0.45            # seconds a gesture trail takes to fade
 # slots clockwise from north; None = this context's own (south-west, north-west); slot 0 = repeat last
-RING = [None, "Kovac_Line", "Kovac_Extrude", "Kovac_Move", "Std_Undo", None, "Kovac_Delete", None]
+RING = [None, "Kovac_Line", "Kovac_Extrude", "Kovac_Move", "Kovac_Undo", None, "Kovac_Delete", None]
 IN_SKETCH = {"Kovac_Move": "Sketcher_Translate"}          # same place, the sketch's own tool
 FINISH_FIRST = {"Kovac_Extrude", "Kovac_Revolve"}         # these leave the sketch, then run
 CONTEXT = {   # kind: ([south-west, north-west], list below)
@@ -24,7 +24,7 @@ CONTEXT = {   # kind: ([south-west, north-west], list below)
                ["Kovac_Polyline", "Sketcher_CreateRectangle", "Sketcher_CreateCircle", "Sketcher_CreateArc",
                 "Sketcher_Trimming", "Sketcher_CreateFillet", "Sketcher_ConstrainCoincident", "Sketcher_ConstrainHorizontal",
                 "Sketcher_ConstrainVertical", "Sketcher_ConstrainEqual", "Sketcher_ConstrainTangent",
-                "Sketcher_ToggleConstruction", "Std_Redo"]),
+                "Sketcher_ToggleConstruction", "Kovac_Redo"]),
     "face": (["Kovac_Sketch", "Kovac_Fillet"],
              ["Kovac_FacePull", "Kovac_Hole", "Kovac_Shell", "Kovac_Chamfer", "Kovac_Draft", "Kovac_DeleteFace", "Kovac_Plane",
               "Kovac_Measure", "Kovac_LookAt", "Kovac_SelectTangent", "Std_HideSelection", "Kovac_Isolate", "Kovac_Material"]),
@@ -37,7 +37,7 @@ CONTEXT = {   # kind: ([south-west, north-west], list below)
               "Kovac_Scale", "Kovac_PatternCirc", "Kovac_Shell", "Kovac_Fillet", "Kovac_ShowAll"]),
     "none": (["Kovac_Sketch", "Kovac_Box"],
              ["Kovac_Home", "Kovac_FitAll", "Kovac_Search", "Kovac_Parameters", "Kovac_ShowAll", "Kovac_SetHome",
-              "Kovac_DefineFront", "Kovac_SaveView", "Std_Redo"]),
+              "Kovac_DefineFront", "Kovac_SaveView", "Kovac_Redo"]),
 }
 _menu = None
 stats = {"last_open_ms": None}

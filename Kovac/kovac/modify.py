@@ -10,7 +10,7 @@ import math
 import FreeCAD as App
 import Part
 
-from kovac import model, selection, topo
+from kovac import copies, model, selection, topo
 
 V = App.Vector
 
@@ -557,19 +557,21 @@ class Transform(model.Feature):
         fp.addProperty("App::PropertyPlacement", "Move", "Move", "translation and rotation")
         fp.addProperty("App::PropertyBool", "Copy", "Move", "keep the original")
         fp.addProperty("App::PropertyVector", "Pivot", "Move", "the turn is about this point")
+        copies.add_props(fp)
 
     def apply(self, fp, state):
         from kovac import move
         m = move.effective(fp)
         for k, bid in enumerate(fp.Bodies):
-            if bid not in state:
-                raise topo.Broken("a body to move no longer exists")
-            moved = state[bid].transformed(m)
             if fp.Copy:
-                moved = topo.Body(moved.shape, [t + "@" + fp.Name for t in moved.tags])
-                state[model.new_body_id(fp, k)] = moved
+                if copies.linked(fp):          # linked copies are links, not bodies (copies.sync_links)
+                    continue
+                moved = copies.source(fp, state, bid).transformed(m)
+                state[model.new_body_id(fp, k)] = topo.Body(moved.shape, [t + "@" + fp.Name for t in moved.tags])
             else:
-                state[bid] = moved
+                if bid not in state:
+                    raise topo.Broken("a body to move no longer exists")
+                state[bid] = state[bid].transformed(m)
         return state
 
 
@@ -604,13 +606,16 @@ class Mirror(model.Feature):
         fp.addProperty("App::PropertyStringList", "Bodies", "Mirror", "body ids")
         fp.addProperty("App::PropertyString", "Plane", "Mirror", "XY/XZ/YZ, a plane, or a flat face").Plane = "YZ"
         fp.addProperty("App::PropertyBool", "Join", "Mirror", "merge the mirror image with the original").Join = True
+        copies.add_props(fp)
 
     def apply(self, fp, state):
         o, n = plane_of(fp, "Plane", state)
         for k, bid in enumerate(fp.Bodies):
-            if bid not in state:
+            if not fp.Join and copies.linked(fp):
+                continue
+            if fp.Join and bid not in state:
                 raise topo.Broken("a body to mirror no longer exists")
-            src = state[bid]
+            src = state[bid] if fp.Join else copies.source(fp, state, bid)
             img = src.shape.mirror(o, n)
             mirrored = topo.Body(img, [t + "@" + fp.Name for t in src.tags])   # mirror keeps face order
             if fp.Join:
@@ -683,6 +688,7 @@ class Pattern(model.Feature):
         fp.addProperty("App::PropertyStringList", "PathEdges", "Path", "or: edges used as the path")
         fp.addProperty("App::PropertyBool", "Align", "Path", "rotate instances to follow the path").Align = True
         fp.addProperty("App::PropertyIntegerList", "Skip", "Pattern", "instance numbers to leave out")
+        copies.add_props(fp)
 
     def placements(self, fp, state):
         out = []
@@ -735,11 +741,10 @@ class Pattern(model.Feature):
                     inst = topo.Body(inst.shape, ["%s@%s.%d" % (t, fp.Name, k) for t in inst.tags])
                     _Op.Name = "%s.%d" % (fp.Name, k)
                     state = model.apply_tool(_Op, state, inst, hint)
-        for bid in fp.Bodies:
-            if bid not in state:
-                raise topo.Broken("a body to pattern no longer exists")
+        for bid in ([] if copies.linked(fp) else fp.Bodies):       # linked: links (copies.sync_links)
+            src = copies.source(fp, state, bid)
             for k, pl in instances:
-                b = state[bid].transformed(pl)
+                b = src.transformed(pl)
                 state[model.new_body_id(fp, k)] = topo.Body(b.shape, ["%s@%s.%d" % (t, fp.Name, k) for t in b.tags])
         if not fp.Sources and not fp.Bodies:
             raise ValueError("Pick features or bodies to repeat.")

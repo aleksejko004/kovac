@@ -146,6 +146,9 @@ def path_frame(top, sub):
     leaf, element = resolve(top, sub)
     path = (sub or "")[:len(sub or "") - len(element)]
     if not path:
+        if leaf is not top:                    # a linked copy: where the copy sits (a mirror left out)
+            from kovac import copies
+            return frame(top).multiply(copies.matrix_placement(top))
         return frame(leaf)
     return top.getSubObject(path, 3).multiply(leaf.Placement.inverse())
 
@@ -157,9 +160,16 @@ def resolve(obj, sub):
     element = sub.split(".")[-1]
     path = sub[:len(sub) - len(element)]
     if not path:
-        return obj, element
+        return _through_copy(obj), element
     leaf = obj.getSubObject(path, 1)
-    return (leaf if leaf is not None else obj), element
+    return _through_copy(leaf if leaf is not None else obj), element
+
+
+def _through_copy(o):
+    """A linked copy of a body (ADR-0005) stands for its original: a pick on it is a pick on that."""
+    if o is not None and type(getattr(o, "Proxy", None)).__name__ == "LinkedCopy" and o.Original is not None:
+        return o.Original
+    return o
 
 
 def selected():
@@ -326,6 +336,80 @@ def new_instance(comp, offset=None):
     return link
 
 
+def _body_objects(comp):
+    from kovac import model
+    return [o for o in comp.Group if isinstance(getattr(o, "Proxy", None), model.BodyProxy)]
+
+
+def _jointed(doc, bodies):
+    from kovac import joints
+    used = set()
+    for j in joints.all_joints(doc):
+        try:
+            used.update(o.body for o in joints.origins(j))
+        except Exception:
+            pass
+    return [b for b in bodies if b in used]
+
+
+def move_bodies(doc, bodies, target):
+    """Move bodies (KovacBody objects) into component `target`, or to the top of the design
+    (None), keeping them where they are shown. A body's shape is in its component's
+    coordinates, so between components that sit differently a history step (a Move by the
+    fixed difference) carries the change (ADR-0004: membership is history state). The
+    sketches they were made from stay where they are. Returns the steps added."""
+    from kovac import model, modify
+    bodies = [b for b in bodies if holder(b) != target]
+    if not bodies:
+        return []
+    if target is not None and not (is_component(target) and target.TypeId == "App::Part"):
+        raise ValueError("Bodies go into a component itself, not into one of its instances.")
+    jointed = _jointed(doc, bodies)
+    if jointed:
+        raise ValueError("%s has joints. Delete them first, or move the whole component."
+                         % ", ".join(b.Label for b in jointed))
+    to = target.getGlobalPlacement() if target is not None else App.Placement()
+    groups = {}
+    for b in bodies:
+        groups.setdefault(holder(b), []).append(b)
+    made = []
+    for old, bs in groups.items():
+        src = old.getGlobalPlacement() if old is not None else App.Placement()
+        step = to.inverse().multiply(src)
+        if not step.isSame(App.Placement(), 1e-9):
+            fp = model.create(doc, modify.Transform, "Rehome", Bodies=[b.BodyId for b in bs], Move=step)
+            fp.Label = "Into %s" % (target.Label if target is not None else "the design")
+            made.append(fp)
+        for b in bs:
+            if target is not None:
+                target.addObject(b)
+            elif old is not None:
+                old.removeObject(b)
+    return made
+
+
+def copy_component(comp, offset=None):
+    """An independent copy of a component, placed beside it: new bodies (a history step that
+    copies them), so features added to the copy change only the copy. The copy still follows
+    edits made to the original's history before the copy step, as any copied body does."""
+    from kovac import model, modify
+    doc = comp.Document
+    src = definition(comp)
+    bodies = _body_objects(src)
+    if not bodies:
+        raise ValueError("%s has no bodies to copy." % src.Label)
+    new = root(doc, create=True).newObject("App::Part", "Component")
+    new.Label = "%s copy" % src.Label
+    if offset is None:
+        bb = _bound(src)
+        offset = App.Vector((bb.XLength if bb else 10) + 10, 0, 0)
+    new.Placement = App.Placement(comp.Placement.Base + offset, comp.Placement.Rotation)
+    fp = model.create(doc, modify.Transform, "Copy", Bodies=[b.BodyId for b in bodies], Copy=True)
+    fp.Home = new.Name                   # the copied bodies are made into the new component
+    fp.Label = "Copy %s" % src.Label
+    return new
+
+
 def _bound(comp):
     import Part
     try:
@@ -348,21 +432,27 @@ def remove(comp):
         except Exception:
             o1 = o2 = None
         if o1 is None or o1.comp in gone or o2.comp in gone:
-            doc.removeObject(j.Name)
+            joints.delete(j)
     for g in joints.grounds(doc):
         if g.ObjectToGround in gone:
             doc.removeObject(g.Name)
     note = ""
     if not is_instance(comp):
-        if not comp.Placement.isSame(App.Placement(), 1e-9):
-            note = "%s had been moved: its bodies are shown where they were modelled." % comp.Label
+        moved = not comp.getGlobalPlacement().isSame(App.Placement(), 1e-9)
+        move_bodies(doc, _body_objects(comp), None)        # bodies stay where they are shown
+        rest = [k for k in comp.Group if k.TypeId != "App::Origin" and k not in _body_objects(comp)]
+        if moved and rest:
+            note = "%s had been moved: its bodies stay where they are; its sketches go back to where they were drawn." \
+                % comp.Label
         comp.Group = [k for k in comp.Group if k.TypeId == "App::Origin"]    # the rest go to the top
     for o in gone:
         if doc.getObject(o.Name) is not None:
             if o.TypeId == "App::Part":
                 origin = getattr(o, "Origin", None)
+                origin = origin.Name if origin is not None else None
                 doc.removeObject(o.Name)
-                if origin is not None and doc.getObject(origin.Name) is not None:
+                origin = doc.getObject(origin) if origin else None     # FreeCAD may have taken it along
+                if origin is not None:
                     for f in list(origin.OriginFeatures):
                         doc.removeObject(f.Name)
                     doc.removeObject(origin.Name)

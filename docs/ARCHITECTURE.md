@@ -1,6 +1,6 @@
 # Architecture
 
-Kovač is a FreeCAD addon (`Kovac/`) plus a branding layer (`dist/`). FreeCAD 1.1.4 is the engine; Kovač is the user experience. See ADR-0001 (addon first), ADR-0002 (body/feature model), ADR-0003 (reference layer) and ADR-0004 (components and joints, proposed).
+Kovač is a FreeCAD addon (`Kovac/`) plus a branding layer (`dist/`). FreeCAD 1.1.4 is the engine; Kovač is the user experience. See ADR-0001 (addon first), ADR-0002 (body/feature model), ADR-0003 (reference layer), ADR-0004 (components and joints) and ADR-0005 (linked and independent copies).
 
 ```
 FreeCAD 1.1.4 (unmodified)                Kovač addon (Kovac/kovac/)
@@ -44,6 +44,9 @@ Part / Sketcher / PartDesign / …                         zoom to cursor, click
                                           components.py components, instances, frames, picks through them
                                           joints.py     joint origins, snaps, solve check, drag
                                           assemble.py   New Component / Instance, Joint, Drag, Ground
+                                          copies.py     linked and independent copies (ADR-0005)
+                                          projection.py projected sketch edges from the body at the sketch's step (no loops)
+                                          export.py   STEP / STL / 3MF export, one file or one per part · exportpanel.py its panel
                                           params.py     named parameters
                                           inspect_tools.py mass properties, interference, section,
                                                         draft analysis, materials panel
@@ -54,6 +57,7 @@ A feature's output is a *state*: all bodies with their face tags, stored as the 
 ## Rules the code follows
 
 - **Every user action goes through `commands.transaction()` or `commands.add()`**: one undo step, recomputed before commit, plain-language errors, no modal dialogs.
+- **Tools that stay on** (pickers, Drag, the Joint panel) register with `commands.started()`. Modelling commands (`add(..., ends_tools=True)`) end them before they start; Kovač's Undo and Redo (`commands.step`, which take over Ctrl+Z and Ctrl+Y from FreeCAD's) only end them when one is running.
 - **Modes swap command bars only.** Model, tree, timeline and selection are shared (`shell.set_mode`).
 - **Machinery stays hidden.** `tree.role()` is the single place that decides what the user sees as component / body / sketch / reference / joint / analysis / feature (timeline only) / machinery (never shown).
 - **Kovač owns viewport input outside edit modes.** In a FreeCAD edit mode (e.g. a sketch), left and right buttons pass through to FreeCAD.

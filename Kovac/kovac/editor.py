@@ -71,10 +71,13 @@ SCHEMAS = {
     "Combine": [("body", "Target", "Target body"), ("bodies", "Tools", "Tool bodies"), ("enum", "Operation", "Operation"),
                 ("bool", "KeepTools", "Keep tools")],
     "SplitBody": [("body", "Body", "Body"), ("plane", "Plane", "Split with")],
-    "Move": [("movetype",), ("bodies", "Bodies", "Bodies"), ("move", "Move", "Move by"), ("bool", "Copy", "Copy")],
+    "Move": [("movetype",), ("bodies", "Bodies", "Bodies"), ("move", "Move", "Move by"), ("bool", "Copy", "Copy"),
+             ("enum", "CopyMode", "Copies")],
     "Scale": [("bodies", "Bodies", "Bodies"), ("float", "Factor", "Factor"), ("vector", "Center", "About point")],
-    "Mirror": [("bodies", "Bodies", "Bodies"), ("plane", "Plane", "Mirror plane"), ("bool", "Join", "Join with the original")],
-    "Pattern": [("features", "Sources", "Features"), ("bodies", "Bodies", "or bodies"), ("enum", "Type", "Type"),
+    "Mirror": [("bodies", "Bodies", "Bodies"), ("plane", "Plane", "Mirror plane"), ("bool", "Join", "Join with the original"),
+               ("enum", "CopyMode", "Copies")],
+    "Pattern": [("features", "Sources", "Features"), ("bodies", "Bodies", "or bodies"), ("enum", "CopyMode", "Body copies"),
+                ("enum", "Type", "Type"),
                 ("vector", "Direction1", "Direction 1"), ("int", "Count1", "Count 1"), ("value", "Spacing1", "Spacing 1"),
                 ("vector", "Direction2", "Direction 2"), ("int", "Count2", "Count 2"), ("value", "Spacing2", "Spacing 2"),
                 ("axis", "Axis", "Axis"), ("int", "Count", "Count"), ("value", "TotalAngle", "Total angle"),
@@ -99,6 +102,8 @@ CHOICE_ICONS = {
     "Auto": "op_auto", "Join": "op_join", "Cut": "op_cut", "Intersect": "op_intersect", "New body": "op_newbody",
     "Simple": "hole_simple", "Counterbore": "hole_counterbore", "Countersink": "hole_countersink", "Tapped": "hole_tapped",
     "Round corners": "offset_round", "Sharp corners": "offset_sharp",
+    "Independent": "copy_component", "Linked": "instance",     # copies (ADR-0005)
+    "One file": "export_one", "One file per part": "export_each",
     "Box": "box", "Cylinder": "cylinder", "Sphere": "sphere", "Cone": "cone", "Torus": "torus",
 }
 
@@ -117,8 +122,11 @@ class IconChoice(QtWidgets.QWidget):
         for v in values:
             b = QtWidgets.QToolButton(objectName="kovacChoice", checkable=True, toolTip=v, text=v,
                                       toolButtonStyle=QtCore.Qt.ToolButtonTextUnderIcon)
-            b.setIcon(QtGui.QIcon(kovac.icon(CHOICE_ICONS[v])))
-            b.setIconSize(QtCore.QSize(28, 28))
+            if v in CHOICE_ICONS:
+                b.setIcon(QtGui.QIcon(kovac.icon(CHOICE_ICONS[v])))
+                b.setIconSize(QtCore.QSize(28, 28))
+            else:                              # a name is the clearest label (STEP, STL, 3MF)
+                b.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
             self.group.addButton(b)
             self.buttons[v] = b
             lay.addWidget(b)
@@ -551,6 +559,8 @@ class Editor(QtWidgets.QWidget):
     # rows ------------------------------------------------------------------
     def add_row(self, form, spec):
         kind, fp = spec[0], self.fp
+        if kind == "enum" and not hasattr(fp, spec[1]):     # an older feature without this option
+            return
         if kind == "op":
             combo = _choice(fp, "Operation")
             combo.currentTextChanged.connect(lambda t: self.set("Operation", t))

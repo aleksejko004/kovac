@@ -16,7 +16,7 @@ FOLDERS = (("body", "Bodies"), ("sketch", "Sketches"), ("reference", "Reference 
 CONTAINERS = ("App::Part", "Assembly::AssemblyObject")
 _FEATURE_PROXIES = {"Extrude", "Revolve", "Sweep", "Loft", "Primitive", "Hole", "Fillet", "Chamfer", "Shell", "Draft",
                     "FacePull", "MoveFace", "DeleteFace", "Combine", "SplitBody", "Transform", "Scale", "Mirror", "Pattern",
-                    "Thread", "Import", "RemoveBody"}
+                    "Thread", "Import", "RemoveBody", "JointStep"}
 ICONS = {"body": "body", "sketch": "sketch", "component": "component", "joint": "joint", "analysis": "section",
          "reference": "plane"}
 
@@ -25,9 +25,11 @@ def role(obj):
     """What the user sees an object as: component, body, sketch, reference, joint, analysis,
     feature (timeline only) or machinery (never shown)."""
     proxy = type(getattr(obj, "Proxy", None)).__name__
+    if proxy == "LinkedCopy":
+        return "linked"                              # a linked copy of a body (ADR-0005)
     if proxy == "BodyProxy":
         return "body" if not obj.Shape.isNull() else "machinery"
-    if proxy == "HistoryProxy":
+    if proxy in ("HistoryProxy", "BodyAt"):
         return "machinery"
     if proxy == "Curve3DProxy":
         return "sketch"
@@ -104,7 +106,7 @@ def item_icon(obj):
     if r == "reference":
         kind = type(getattr(obj, "Proxy", None)).__name__
         return kovac.icon({"DatumAxis": "axis", "DatumPoint": "point"}.get(kind, "plane"))
-    if r == "component" and obj.TypeId == "App::Link":
+    if r == "linked" or (r == "component" and obj.TypeId == "App::Link"):
         return kovac.icon("instance")
     if r == "joint":
         if hasattr(obj, "ObjectToGround"):
@@ -223,7 +225,7 @@ def create():
                     it.setToolTip(0, "Active component: new geometry goes here")
                 self.fill(it, doc, c)
             for r, title in FOLDERS:
-                members = [o for o in objs if role(o) == r]
+                members = [o for o in objs if role(o) == r or (r == "body" and role(o) == "linked")]  # copies by their bodies
                 if not members:
                     continue
                 folder = self.item(parent, "%s  (%d)" % (title, len(members)), icon=qicon("folder"),
@@ -280,6 +282,9 @@ def create():
             from kovac import curve3d
             if curve3d.is_curve(o):
                 curve3d.edit(o)
+            elif o is not None and o.TypeId.startswith("Sketcher::"):
+                from kovac import sketchmode
+                sketchmode.edit(o)
             elif o is not None and role(o) == "component" and o.TypeId == "App::Part":
                 from kovac import components          # double-click again: back to the top
                 view = Gui.ActiveDocument.ActiveView
@@ -305,6 +310,8 @@ def create():
                     if o.TypeId == "App::Part":
                         m.addAction("Activate", lambda: self.double(it, 0))
                     m.addAction("New instance", lambda: assemble.instance([o]))
+                    if o.TypeId == "App::Part":
+                        m.addAction("Copy", lambda: assemble.copy([o]))
                     m.addAction("Move…", lambda: assemble.move_component(o))
                     grounded = o in joints.grounded(o.Document)
                     m.addAction("Unground" if grounded else "Ground", lambda: assemble.ground([o], not grounded))
@@ -313,12 +320,74 @@ def create():
                     m.addAction("Edit joint…", lambda: assemble.edit_joint(o))
                 if role(o) == "body":
                     m.addAction("Material…", lambda: commands.run("Kovac_Material"))
+                    bodies = [x for x in sel if role(x) == "body"] if o in sel else [o]
+                    m.addAction("Make component" if len(bodies) == 1 else "Make component of %d bodies" % len(bodies),
+                                lambda: self.make_component(bodies))
+                    self.move_menu(m, o, sel)
+                if role(o) in ("body", "component", "linked"):
+                    parts = [x for x in sel if role(x) in ("body", "component", "linked")] if o in sel else [o]
+                    m.addAction("Export…" if len(parts) == 1 else "Export %d…" % len(parts),
+                                lambda: self.export(parts))
+                if role(o) == "linked":
+                    m.addAction("Make independent", lambda: self.make_independent(o))
                 if len(sel) > 1 and o in sel:
                     m.addAction("Delete %d selected" % len(sel), self.delete_selected)
                 else:
                     m.addAction("Delete", lambda: self.delete(o))
             m.addAction("Save current view…", self.save_view)
             m.exec(self.viewport().mapToGlobal(pos))
+
+        def move_menu(self, m, o, sel):
+            """The Move to submenu: the other components, or the top of the design; bodies keep their place."""
+            from kovac import assemble, components
+            bodies = [x for x in sel if role(x) == "body"] if o in sel else [o]
+            here = {components.holder(b) for b in bodies}
+            places = [c for c in components.all_components(o.Document) if c.TypeId == "App::Part"]
+            if not places:
+                return
+            sub = m.addMenu("Move to")
+            for c in places:
+                a = sub.addAction(c.Label, lambda c=c: self.run_move(bodies, c))
+                a.setEnabled(here != {c})
+            a = sub.addAction("Top of the design", lambda: self.run_move(bodies, None))
+            a.setEnabled(here != {None})
+
+        def make_component(self, bodies):
+            from kovac import assemble
+            try:
+                assemble.new_component(bodies)
+            except Exception as e:
+                commands.report(e)
+            self.rebuild()
+
+        def export(self, parts):
+            from kovac import exportpanel
+            Gui.Selection.clearSelection()
+            for x in parts:
+                Gui.Selection.addSelection(x)
+            exportpanel.open_panel()
+
+        def make_independent(self, link):
+            from kovac import copies, model
+            fp = link.Document.getObject(link.KovacCopyOf)
+            if fp is None:
+                return
+            try:
+                with commands.transaction("Make independent", link.Document):
+                    copies.make_independent(fp)
+                    model.commit(link.Document)
+                commands.report("%s: its copies are bodies of their own now." % fp.Label, error=False)
+            except Exception as e:
+                commands.report(e)
+            self.rebuild()
+
+        def run_move(self, bodies, target):
+            from kovac import assemble
+            try:
+                assemble.move_to(bodies, target)
+            except Exception as e:
+                commands.report(e)
+            self.rebuild()
 
         def keyPressEvent(self, ev):
             if ev.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
@@ -353,6 +422,12 @@ def create():
                             note = components.remove(o)
                             if note:
                                 commands.report(note)
+                        elif role(o) == "linked":
+                            from kovac import copies
+                            copies.remove(o)
+                        elif role(o) == "joint":
+                            from kovac import joints
+                            joints.delete(o)
                         else:
                             doc.removeObject(o.Name)
             except Exception as e:

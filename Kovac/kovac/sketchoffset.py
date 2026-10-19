@@ -30,16 +30,30 @@ ARROW_PX, HIT_PX = 130, 14
 
 def _chains(geos):
     """Picked curves grouped into chains that join end to end, each in order as
-    [(geometry, reversed)], with whether the chain closes on itself."""
+    [(geometry, reversed)], with whether the chain closes on itself. Each chain runs the way its
+    first picked curve (geos order) is drawn, so that curve sets the side for the whole chain.
+    Which way the others run comes from their end points: an edge's Orientation in a wire
+    made of edges drawn every which way doesn't tell."""
     edges = [g.toShape() for g in geos]
     out = []
     for group in Part.sortEdges(edges):
-        w = Part.Wire(group)
+        idx = [next(k for k, x in enumerate(edges) if x.isSame(e) or _same(x, e)) for e in group]
         items = []
-        for e in w.OrderedEdges:
-            i = next(k for k, x in enumerate(edges) if x.isSame(e) or _same(x, e))
-            items.append((geos[i], e.Orientation == "Reversed"))
-        out.append((items, w.isClosed() if len(items) > 1 else _closed(items[0][0])))
+        for n, i in enumerate(idx):
+            s, e = _ends(geos[i], False)
+            if n == 0:
+                nxt = geos[idx[1]] if len(idx) > 1 else None
+                rev = nxt is not None and min((s - p).Length for p in _ends(nxt, False)) < TOL * 10 \
+                    and min((e - p).Length for p in _ends(nxt, False)) >= TOL * 10
+            else:
+                rev = (s - at).Length >= TOL * 10
+            items.append((geos[i], rev))
+            at = s if rev else e
+        closed = len(items) > 1 and (_ends(*items[0])[0] - at).Length < TOL * 10
+        first = min(range(len(idx)), key=lambda n: idx[n])     # the earliest pick in this chain
+        if items[first][1]:                                     # run the chain the way that one is drawn
+            items = [(g, not r) for g, r in reversed(items)]
+        out.append((items, closed if len(items) > 1 else _closed(items[0][0])))
     return out
 
 

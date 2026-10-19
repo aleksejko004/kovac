@@ -44,7 +44,7 @@ then a stop for owner review.
 - Write ADR-0004 (component and joint model) with the measured results; add OndselSolver to
   `THIRD_PARTY.md` (bundled, no new download).
 
-### Step 1 — Components inside one design
+### Step 1 — Components inside one design — built, except dragging bodies between components in the browser (Move to menu instead)
 - **New Component**: empty, or from the selected bodies. Double-click makes it active (bold);
   new sketches and features go into the active component and work in its own coordinates.
 - Drag bodies between components in the browser; the history records it (one undo step).
@@ -71,7 +71,7 @@ then a stop for owner review.
 - Tests: each joint type's remaining degrees of freedom, references surviving the toponaming
   torture edits, one undo step per joint.
 
-### Step 4 — Motion
+### Step 4 — Motion — built, except the contact check
 - Drag a component in the view: the solver keeps its joints (a hinge swings, a slider slides).
 - Joint limits (min/max angle or distance), and "drive" a joint from its panel to animate it.
 - Contact check while dragging (uses the existing interference tool), optional.

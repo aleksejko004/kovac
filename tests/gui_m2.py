@@ -224,6 +224,12 @@ def seg_bracket():
     mb = mw.findChild(QtWidgets.QToolButton, "kovacModeButton")
     check("the big mode button shows the mode", mb is not None and mb.isVisible() and mb.text() == "DESIGN", mb and mb.text())
     ribbon = mw.findChild(QtWidgets.QToolBar, "kovacGroup_Design_0")
+    from kovac import shell
+    modes = mw.findChild(QtWidgets.QToolBar, "kovacModes")
+    modes.hide(), ribbon.hide()                 # as a layout saved while a sketch was open restores
+    shell.arrange()
+    check("a layout saved mid-sketch still starts with the mode button and the ribbon",
+          modes.isVisible() and ribbon.isVisible())
     below = []
     for grp in ribbon.findChildren(QtWidgets.QWidget, "kovacRibbonGroup"):
         lab = grp.findChild(QtWidgets.QLabel, "kovacGroupLabel")
@@ -322,6 +328,17 @@ def seg_bracket():
     yield 200
     chain = new_since(n1)
     check("polyline: connected segments from the line tool", len(chain) == 2 and chain[0][1] == chain[1][0], chain)
+    n1b = len(sk.Geometry)                    # a corner off the grid (as a typed length leaves it)
+    acts["Kovac_Polyline"].trigger()
+    yield 200
+    yield from clicks([V(-6 * g, -2 * g, 0), V(-3.4 * g, -2.3 * g, 0), V(-3 * g, -5 * g, 0)])
+    Gui.runCommand("Sketcher_StopOperation")
+    yield 800                                 # the chain has seen its tool go (it polls every few 100 ms)
+    chain = new_since(n1b)
+    tied = any(c.Type == "Coincident" and {(c.First, c.FirstPos), (c.Second, c.SecondPos)} == {(n1b, 2), (n1b + 1, 1)}
+               for c in sk.Constraints)
+    check("polyline: a corner off the grid stays joined (the next line starts there, coincident)",
+          len(chain) == 2 and V(*chain[0][1]).isEqual(V(*chain[1][0]), 1e-7) and tied, (g, chain, tied))
     # polygon around a circle: the drawn radius is where the sides touch
     n2 = len(sk.Geometry)
 
@@ -343,7 +360,7 @@ def seg_bracket():
     touch = inner is not None and sides and all(
         abs(((x.StartPoint + x.EndPoint) * 0.5 - inner.Center).Length - inner.Radius) < 1e-6 for x in sides)
     check("polygon around a circle: its sides touch the drawn circle", touch and abs(inner.Radius - 2 * g) < 1e-6,
-          inner and (inner.Radius, len(sides)))
+          inner and (inner.Radius, len(sides), [(tuple(round(c / g, 2) for c in x.StartPoint[:2]), tuple(round(c / g, 2) for c in x.EndPoint[:2])) for x in sides]))
     # right click (no tool running) opens the radial menu with the sketch's own ring
     c0 = to_qt(V(-3 * g, -3 * g, 0))
     mouse(QtCore.QEvent.MouseButtonPress, c0, QtCore.Qt.RightButton, QtCore.Qt.RightButton)
@@ -585,6 +602,13 @@ def seg_bracket():
           wsk.getGlobalPlacement() if wsk else (mw.statusBar().currentMessage(),
                                                 [(x.Object.Name, x.SubElementNames) for x in Gui.Selection.getSelectionEx("", 0)],
                                                 [o.Name for o in App.ActiveDocument.Objects]))
+    from kovac import grid, projection
+    links = [o for o, _ in wsk.ExternalGeometry]
+    check("a sketch on a face shows the face's outline, projected from the body at the sketch's step",
+          len(links) == 1 and projection.is_body_at(links[0]) and len(wsk.ExternalGeo) > 2 and not wsk.Shape.Edges,
+          ([o.Name for o in links], len(wsk.ExternalGeo)))
+    corner = wsk.ExternalGeo[2].StartPoint
+    check("the outline's corners are snap points", any((p - corner).Length < 1e-6 for p in grid._points(wsk)), corner)
     wp = [V(0, 0, 0), V(6, 0, 0), V(6, 40, 0), V(0, 40, 0)]
     for i in range(4):
         wsk.addGeometry(Part.LineSegment(wp[i], wp[(i + 1) % 4]))
@@ -1175,6 +1199,111 @@ def seg_offset():
     check("sharp corners: a rectangle offsets to a larger rectangle of four lines, no rounded corners",
           len(added) == 4 and all(isinstance(x, Part.LineSegment) for x in added) and bb and
           abs(bb.XLength - 46) < 1e-6 and abs(bb.YLength - 26) < 1e-6, (len(added), bb))
+    vp().setFocus()
+    QtTest.QTest.keyClick(vp(), QtCore.Qt.Key_Z, QtCore.Qt.ControlModifier)
+    yield 400
+    check("Ctrl+Z in a sketch takes back the last step there (the offset), and the sketch stays open",
+          len(sk.Geometry) == r0 + 4 and sketchmode.in_sketch(), (len(sk.Geometry), r0 + 4, sketchmode.in_sketch()))
+    # a dimension selected, then a double click on another: the second follows the first
+    import Sketcher
+    l1 = sk.addGeometry(Part.LineSegment(V(0, -40, 0), V(30, -40, 0)))
+    l2 = sk.addGeometry(Part.LineSegment(V(0, -70, 0), V(12, -70, 0)))
+    c1 = sk.addConstraint(Sketcher.Constraint("Distance", l1, 30.0))
+    c2 = sk.addConstraint(Sketcher.Constraint("Distance", l2, 12.0))
+    App.ActiveDocument.recompute()
+    Gui.Selection.clearSelection()
+    views.go(view(), views.view_rotation((0, 0, 1)), fit=True)
+    yield 600
+
+    def label_of(c, line):                     # where the sketcher draws the dimension: hover across the line
+        g = sk.Geometry[line]
+        mid = to_qt((g.StartPoint + g.EndPoint) * 0.5)
+        for dy in range(-90, 91, 2):
+            mouse(QtCore.QEvent.MouseMove, mid + QtCore.QPoint(0, dy))
+            QtWidgets.QApplication.processEvents()
+            pre = Gui.Selection.getPreselection()
+            if "Constraint%d" % (c + 1) in getattr(pre, "SubElementNames", ()):
+                return mid + QtCore.QPoint(0, dy)
+        return None
+    p1, p2 = label_of(c1, l1), label_of(c2, l2)
+    Lb = QtCore.Qt.LeftButton
+    if p1 is not None and p2 is not None:
+        mouse(QtCore.QEvent.MouseMove, p1)
+        mouse(QtCore.QEvent.MouseButtonPress, p1, Lb, Lb)
+        mouse(QtCore.QEvent.MouseButtonRelease, p1, Lb, QtCore.Qt.NoButton)
+        yield 300
+        mouse(QtCore.QEvent.MouseMove, p2)
+        mouse(QtCore.QEvent.MouseButtonPress, p2, Lb, Lb)
+        mouse(QtCore.QEvent.MouseButtonRelease, p2, Lb, QtCore.Qt.NoButton)
+        mouse(QtCore.QEvent.MouseButtonDblClick, p2, Lb, Lb)
+        mouse(QtCore.QEvent.MouseButtonRelease, p2, Lb, QtCore.Qt.NoButton)
+        yield 400
+    dialogs = [w for w in QtWidgets.QApplication.topLevelWidgets() if isinstance(w, QtWidgets.QDialog) and w.isVisible()]
+    for d in dialogs:
+        d.reject()
+    sk.setDatum(c1, 25.0)
+    App.ActiveDocument.recompute()
+    yield 200
+    check("with a dimension selected, double-clicking another makes it equal, and it follows",
+          p1 is not None and p2 is not None and not dialogs and abs(sk.Geometry[l2].length() - 25) < 1e-6
+          and App.ActiveDocument.UndoNames[:1] == ["Equal dimensions"],
+          (p1, p2, dialogs, sk.Geometry[l2].length(), App.ActiveDocument.UndoNames[:3]))
+    # the dimension tool: no locking value window; a small box takes a typed value, or a click
+    # on a dimension already there makes the new one equal it
+    def dimension(line, at):
+        g = sk.Geometry[line]
+        on, place = to_qt((g.StartPoint + g.EndPoint) * 0.5), to_qt((g.StartPoint + g.EndPoint) * 0.5 + at)
+        for q in (on, place):                   # pick the line, then place the dimension
+            for k in (6, 3, 0):
+                mouse(QtCore.QEvent.MouseMove, q + QtCore.QPoint(k, 0))
+                QtWidgets.QApplication.processEvents()
+            mouse(QtCore.QEvent.MouseButtonPress, q, Lb, Lb)
+            mouse(QtCore.QEvent.MouseButtonRelease, q, Lb, QtCore.Qt.NoButton)
+            QtWidgets.QApplication.processEvents()
+    l3 = sk.addGeometry(Part.LineSegment(V(0, -100, 0), V(20, -100, 0)))
+    l4 = sk.addGeometry(Part.LineSegment(V(0, -130, 0), V(8, -130, 0)))
+    App.ActiveDocument.recompute()
+    Gui.Selection.clearSelection()
+    yield 300
+    p1 = label_of(c1, l1)
+    command("Sketcher_Dimension")
+    yield 300
+    dimension(l3, V(0, 6, 0))
+    yield 400
+    box = sketchtools.open_box()
+    modal = QtWidgets.QApplication.activeModalWidget()
+    if box is not None:
+        box.field.setText("18")
+        box.field.returnPressed.emit()
+    yield 400
+    check("a dimension just placed asks for its value in a box that doesn't lock the view; typing 18 sets it",
+          box is not None and modal is None and abs(sk.Geometry[l3].length() - 18) < 1e-6 and sketchtools.tool_running(),
+          (box, modal, sk.Geometry[l3].length(), sketchtools.tool_running()))
+    dimension(l4, V(0, 6, 0))
+    yield 400
+    box = sketchtools.open_box()
+    if box is not None and p1 is not None:
+        mouse(QtCore.QEvent.MouseMove, p1)
+        yield 150
+        mouse(QtCore.QEvent.MouseButtonPress, p1, Lb, Lb)
+        mouse(QtCore.QEvent.MouseButtonRelease, p1, Lb, QtCore.Qt.NoButton)
+    yield 400
+    check("with the box open, clicking a dimension already there makes the new one equal it",
+          box is not None and p1 is not None and abs(sk.Geometry[l4].length() - 25) < 1e-6
+          and sketchtools.open_box() is None and sketchtools.tool_running(),
+          (box, p1, sk.Geometry[l4].length(), sketchtools.open_box(), sketchtools.tool_running()))
+    Gui.runCommand("Sketcher_StopOperation")
+    yield 200
+    sketchmode.finish()
+    yield 300
+    br = Gui.getMainWindow().findChild(QtWidgets.QFrame, "kovacBrowser")
+    tw = br.findChild(QtWidgets.QTreeWidget) if br else None
+    items = tw.findItems(sk.Label, QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive) if tw else []
+    if items:
+        tw.itemDoubleClicked.emit(items[0], 0)
+    yield 600
+    check("double-clicking a sketch in the browser opens it", bool(items) and sketchmode.in_sketch(),
+          (bool(tw), len(items), sketchmode.in_sketch()))
     sketchmode.finish()
     yield 300
 
@@ -1243,8 +1372,11 @@ def seg_assembly():
     views.go(view(), views.view_rotation(views.ISO), fit=True)
     yield 400
     rim = V(15 + 5 * math.cos(math.radians(225)), 20 + 5 * math.sin(math.radians(225)), 10)   # the rim, facing the camera
-    mouse(QtCore.QEvent.MouseMove, to_qt(rim))
-    yield 200
+    for _ in range(10):                          # the view may still be settling after the turn: hover again
+        mouse(QtCore.QEvent.MouseMove, to_qt(rim))
+        yield 100
+        if tool is not None and tool.nodes:
+            break
     check("Joint: hovering the hole's rim shows a joint-origin marker", tool is not None and len(tool.nodes) >= 1,
           tool and len(tool.nodes))
     click_at(rim)
@@ -1266,7 +1398,112 @@ def seg_assembly():
     yield 300
     jl = [it.text(0) for it in tw.findItems("Joints", QtCore.Qt.MatchStartsWith | QtCore.Qt.MatchRecursive)] if tw else []
     check("the browser's Joints folder lists the joint and the ground", jl == ["Joints  (2)"], jl)
+    strip = Gui.getMainWindow().findChild(QtWidgets.QListWidget, "kovacTimelineList")
+    tips = [strip.item(i).toolTip() for i in range(strip.count())] if strip else []
+    check("the joint is a step in the timeline", any(t.startswith("Joint " + j.Label) for t in tips), tips[-3:])
     shot("assembly_joint")
+
+    # -- driving the joint from its panel: a typed angle, a limit, Play --
+    assemble.edit_joint(j)
+    yield 400
+    ed = assemble._tool
+    dock = ed.dock if ed else None
+    angle = dock.findChild(QtWidgets.QLineEdit, "kovacJointAngle") if dock else None
+    if angle is not None:
+        angle.setFocus()
+        angle.setText("30")
+        angle.returnPressed.emit()
+    yield 300
+    check("Joint panel: a typed angle turns the pin about the hinge",
+          angle is not None and abs(joints.position(j)[0] - 30) < 1e-4 and joints.satisfied(j),
+          (angle is not None, joints.position(j)))
+    box = dock.findChild(QtWidgets.QCheckBox, "kovacJointAngleLimit") if dock else None
+    lo, hi = (dock.findChild(QtWidgets.QLineEdit, n) for n in ("kovacJointAngleMin", "kovacJointAngleMax")) if dock else (None, None)
+    if box is not None:
+        lo.setText("-60")
+        hi.setText("45")
+        box.setChecked(True)
+        angle.setText("80")
+        angle.returnPressed.emit()
+    yield 300
+    check("Joint panel: with the angle limited to -60 … 45, typing 80 stops at 45",
+          box is not None and joints.limits(j)["angle"] == (-60.0, 45.0) and abs(joints.position(j)[0] - 45) < 1e-4,
+          (joints.limits(j), joints.position(j)))
+    play = dock.findChild(QtWidgets.QPushButton, "kovacJointPlay") if dock else None
+    seen = []
+    if play is not None:
+        press(play)
+        for _ in range(80):
+            yield 50
+            seen.append(joints.position(j)[0])
+            if ed.playing is None:
+                break
+    check("Play runs the joint between its limits and back to where it was",
+          play is not None and ed.playing is None and min(seen) < -59 and max(seen) > 44 and
+          abs(joints.position(j)[0] - 45) < 1e-3, (seen and (min(seen), max(seen)), joints.position(j)))
+    shot("assembly_joint_motion")
+    if ed is not None:
+        ed.ok()
+    yield 300
+
+    # -- sketching after a joint: a selected face of a component, then a face clicked in the picker --
+    def new_sketch(act):
+        before = {o.Name for o in doc.Objects}
+        yield from act()
+        made = [o for o in doc.Objects if o.Name not in before and o.TypeId == "Sketcher::SketchObject"]
+        result.append(made[0] if made else None)
+        if sketchmode.in_sketch():
+            sketchmode.finish()
+        yield 300
+
+    def selected_face():
+        Gui.Selection.clearSelection()
+        click_at(V(45, 30, 10))                        # the plate's top face
+        yield 150
+        command("Kovac_Sketch")
+        yield 600
+    result = []
+    yield from new_sketch(selected_face)
+    sk = result[-1]
+    check("after a joint, a selected face of a component still takes a sketch",
+          sk is not None and abs(sk.getGlobalPlacement().Base.z - 10) < 1e-6,
+          (sk and sk.getGlobalPlacement(), Gui.getMainWindow().statusBar().currentMessage(),
+           [(x.Object.Name, x.SubElementNames) for x in Gui.Selection.getSelectionEx("", 0)]))
+
+    def picked_face():
+        Gui.Selection.clearSelection()
+        command("Kovac_DragComponent")                 # left on: Sketch must end it, or it takes the clicks
+        yield 200
+        command("Kovac_Sketch")
+        yield 600
+        top = pin_c.Placement.multVec(V(101, 1, 0))        # the pin stands upside down on the hole: its z = 0 end is on top
+        click_at(top)
+        yield 600
+    yield from new_sketch(picked_face)
+    sk = result[-1]
+    check("after a joint, with Drag left on, Sketch ends Drag and the picker takes a clicked face of a moved component",
+          sk is not None and abs(sk.getGlobalPlacement().Base.z - 40) < 1e-6 and assemble._drag is None,
+          (sk and sk.getGlobalPlacement(), Gui.getMainWindow().statusBar().currentMessage()))
+
+    # -- Undo while picking a plane ends the picker and undoes nothing --
+    Gui.Selection.clearSelection()
+    command("Kovac_Sketch")
+    yield 500
+    undos = list(doc.UndoNames)
+    command("Kovac_Undo")                              # the undo arrow; Ctrl+Z is the same command
+    yield 400
+    picking = [h for h in navigation.hooks if isinstance(h, sketchmode.PlanePicker)]
+    keys = [a.shortcut().toString() for a in Gui.Command.get("Kovac_Undo").getAction()]
+    stock = [a.shortcut().toString() for a in Gui.Command.get("Std_Undo").getAction()]
+    check("Undo while picking a sketch plane leaves the picker and undoes nothing; Ctrl+Z is Kovač's Undo",
+          not picking and list(doc.UndoNames) == undos and not sketchmode.in_sketch() and
+          keys == ["Ctrl+Z"] and stock == [""],
+          (len(picking), undos[:3], doc.UndoNames[:3], sketchmode.in_sketch(), keys, stock))
+    command("Kovac_Undo")                              # nothing running now: a real undo
+    yield 400
+    check("Undo with no tool running undoes the last step", list(doc.UndoNames) == undos[1:], (undos[:3], doc.UndoNames[:3]))
+    command("Kovac_Redo")
+    yield 400
 
     # -- Drag: the pin turns about the hole's axis, the plate holds still --
     command("Kovac_DragComponent")
@@ -1325,7 +1562,7 @@ def seg_assembly():
     yield 200
 
     # -- undo the joint: gone, the pin back where it was --
-    for _ in range(10):
+    for _ in range(20):
         if doc.UndoNames and doc.UndoNames[0] == "Joint":
             break
         doc.undo()
@@ -1334,9 +1571,239 @@ def seg_assembly():
     yield 400
     check("Undo removes the joint again", not joints.all_joints(doc), [o.Name for o in joints.all_joints(doc)])
 
+    # -- Copy, Move to (browser), deleting a moved component: bodies stay where they are shown --
+    def shown(b):
+        return b.Shape.transformed(components.frame(b).toMatrix()).BoundBox
+    pin_c.Placement = App.Placement(V(30, 0, 0), App.Rotation(V(0, 1, 0), 20))
+    model.commit(doc)
+    yield 200
+    Gui.Selection.clearSelection()
+    Gui.Selection.addSelection(pin_c)
+    command("Kovac_CopyComponent")
+    yield 400
+    copy_c = next((c for c in components.all_components(doc) if c.Label.startswith(pin_c.Label + " copy")), None)
+    copy_b = [o for o in (copy_c.Group if copy_c else []) if type(getattr(o, "Proxy", None)).__name__ == "BodyProxy"]
+    check("Copy Component: a new component beside the pin with a body of its own",
+          copy_c is not None and len(copy_b) == 1 and copy_b[0].BodyId != pin_b.BodyId and
+          abs(copy_b[0].Shape.Volume - pin_b.Shape.Volume) < 1e-6, (copy_c and copy_c.Label, len(copy_b)))
+    before = shown(plate_b)
+    tw.run_move([plate_b], pin_c) if hasattr(tw, "run_move") else None
+    yield 400
+    after = shown(plate_b)
+    check("browser Move to: the plate goes into the turned pin component and stays where it was",
+          components.holder(plate_b) == pin_c and all(abs(getattr(before, k) - getattr(after, k)) < 1e-5
+                                                       for k in ("XMin", "YMin", "ZMin", "XMax", "YMax", "ZMax")),
+          (components.holder(plate_b) and components.holder(plate_b).Label, before, after))
+    before = shown(plate_b)
+    tw.delete(pin_c)
+    yield 400
+    after = shown(plate_b)
+    check("deleting a moved component leaves its bodies where they are",
+          components.holder(plate_b) is None and all(abs(getattr(before, k) - getattr(after, k)) < 1e-5
+                                                     for k in ("XMin", "YMin", "ZMin", "XMax", "YMax", "ZMax")),
+          (before, after, Gui.getMainWindow().statusBar().currentMessage()))
+
+
+def seg_copies():
+    """Linked and independent copies: the panel's choice, the linked look, picks through a copy."""
+    from kovac import components, copies, editor, features, model, modify, sketchmode, views
+    doc = App.newDocument("CopiesTest")
+    yield 300
+    sk = sketchmode.create("XY", name="Block")
+    pts = [V(0, 0, 0), V(20, 0, 0), V(20, 10, 0), V(0, 10, 0)]
+    for i in range(4):
+        sk.addGeometry(Part.LineSegment(pts[i], pts[(i + 1) % 4]))
+    sketchmode.finish()
+    yield 300
+    ex = editor.start(features.Extrude, Profile=sk, Length=5)
+    ex.accept()
+    yield 300
+    block = bodies()[0]
+    ed = editor.start(modify.Pattern, Bodies=[block.BodyId], Count1=3, Spacing1=30)
+    yield 400
+    choice = next((w for w in ed.findChildren(editor.IconChoice) if "Linked" in w.buttons), None)
+    if choice is not None:
+        press(choice.buttons["Linked"])
+    yield 400
+    links = copies.links_of(ed.fp)
+    check("Pattern panel: choosing Linked shows the copies as links while the panel is open",
+          choice is not None and ed.fp.CopyMode == "Linked" and len(links) == 2, (choice is not None, ed.fp.CopyMode, len(links)))
+    ed.accept()
+    yield 400
+    pat = model.items(doc)[-1]
+    links = copies.links_of(pat)
+    tinted = all(lk.ViewObject.ShapeAppearance[0].DiffuseColor[:3] != block.ViewObject.ShapeAppearance[0].DiffuseColor[:3]
+                 for lk in links)
+    check("linked copies are drawn in the linked colour and are not bodies", len(links) == 2 and tinted and len(bodies()) == 1,
+          (len(links), tinted, len(bodies())))
+    Gui.Selection.clearSelection()
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 500
+    img = view().graphicsView().viewport().grab().toImage()
+    teal = 0
+    for lk in links:                                 # the middle of each copy's top face is tinted
+        x, y = view().getPointOnViewport(Part.getShape(lk).BoundBox.Center + V(0, 0, 2.5))
+        c = img.pixelColor(int(x), int(img.height() - y))         # both in device pixels
+        teal += c.green() > c.red() + 25
+    check("linked copies show in the linked (accent-tinted) colour", teal == len(links), teal)
+    shot("copies_tint")
+    br = Gui.getMainWindow().findChild(QtWidgets.QFrame, "kovacBrowser")
+    tw = br.findChild(QtWidgets.QTreeWidget) if br else None
+    labels = [it.text(0) for it in tw.findItems("", QtCore.Qt.MatchContains | QtCore.Qt.MatchRecursive)] if tw else []
+    check("the browser lists the linked copies", sum("(linked" in t for t in labels) == 2, labels[:10])
+    views.go(view(), views.view_rotation(views.ISO), fit=True)
+    yield 500
+    Gui.Selection.clearSelection()
+    click_at(V(70, 5, 5))                             # the top of the second copy
+    yield 300
+    sel = components.selected()
+    check("a click on a linked copy picks the original body",
+          bool(sel) and sel[0][0] == block and model.pick_ref(sel[0][2], sel[0][3]) is not None,
+          [(s[0].Name, s[1], s[2].Name, s[3]) for s in sel])
+    shot("copies_linked")
+    ex.fp.Length = 12
+    model.commit(doc)
+    yield 400
+    check("changing the original changes every linked copy",
+          all(abs(Part.getShape(lk).BoundBox.ZLength - 12) < 1e-6 for lk in copies.links_of(pat)),
+          [Part.getShape(lk).BoundBox.ZLength for lk in copies.links_of(pat)])
+    tw.make_independent(copies.links_of(pat)[0]) if hasattr(tw, "make_independent") else None
+    yield 400
+    check("browser Make independent: the copies become bodies of their own",
+          not copies.links_of(pat) and len(bodies()) == 3 and pat.CopyMode == "Independent", (len(bodies()), pat.CopyMode))
+    ex.fp.Length = 5
+    model.commit(doc)
+    yield 300
+    check("an independent copy keeps its shape when the original changes",
+          sorted(round(b.Shape.BoundBox.ZLength) for b in bodies()) == [5, 12, 12], [b.Shape.BoundBox.ZLength for b in bodies()])
+
+
+def seg_projection():
+    """Edges projected from a body into a sketch on it, then extruded: no dependency loop."""
+    from kovac import commands, editor, features, model, projection, sketchmode
+    doc = App.newDocument("ProjectionTest")
+    yield 300
+    sk = sketchmode.create("XY", name="Plate")
+    pts = [V(0, 0, 0), V(20, 0, 0), V(20, 10, 0), V(0, 10, 0)]
+    for i in range(4):
+        sk.addGeometry(Part.LineSegment(pts[i], pts[(i + 1) % 4]))
+    sketchmode.finish()
+    yield 300
+    ex = editor.start(features.Extrude, Profile=sk, Length=5)
+    ex.accept()
+    yield 300
+    block = bodies()[0]
+    top = next("Face%d" % k for k, f in enumerate(block.Shape.Faces, 1) if abs(f.BoundBox.ZMin - 5) < 1e-9
+               and abs(f.BoundBox.ZMax - 5) < 1e-9)
+    sk2 = sketchmode.create(model.pick_ref(block, top), name="OnTop", project=(block, top))   # as a click on it does
+    yield 600
+    links = [o for o, _ in sk2.ExternalGeometry]
+    check("edges projected from a body come from the body at the sketch's step, not the live body",
+          len(links) == 1 and projection.is_body_at(links[0]) and len(sk2.ExternalGeo) == 6,
+          ([o.Name for o in links], len(sk2.ExternalGeo)))
+    for a, b in ((V(5, 2, 0), V(15, 2, 0)), (V(15, 2, 0), V(15, 8, 0)), (V(15, 8, 0), V(5, 8, 0)), (V(5, 8, 0), V(5, 2, 0))):
+        sk2.addGeometry(Part.LineSegment(a, b))
+    sketchmode.finish()
+    yield 300
+    ex2 = editor.start(features.Extrude, Profile=sk2, Length=3)
+    ex2.accept()
+    yield 400
+    fp = model.items(doc)[-1]
+    loops = []
+    for o in doc.Objects:
+        try:
+            o.OutListRecursive
+        except Exception:
+            loops.append(o.Name)
+    check("extruding that sketch works: no loop, and the body grows by the square",
+          not loops and fp.Status == "" and abs(block.Shape.Volume - (1000 + 180)) < 1e-6,
+          (loops, fp.Status, block.Shape.Volume))
+
+    # -- Finish Sketch with the dimension tool still running (it used to crash FreeCAD)
+    sketchmode.edit(sk2)
+    yield 600
+    Gui.runCommand("Sketcher_Dimension")
+    yield 300
+    for k in range(5):
+        mouse(QtCore.QEvent.MouseMove, vp().rect().center() + QtCore.QPoint(7 * k, 3 * k))
+        yield 50
+    press(Gui.getMainWindow().findChild(QtWidgets.QPushButton, "kovacFinish"))
+    yield 600
+    check("Finish Sketch with the dimension tool running closes the sketch (no crash)",
+          not sketchmode.in_sketch(), sketchmode.in_sketch())
+
+
+def seg_export():
+    """Browser right-click: Make component, Export…; the Export panel writes the files."""
+    import tempfile
+    from kovac import commands, components, exportpanel, features, model, shell
+    doc = App.newDocument("ExportTest")
+    yield 300
+    for x in (0, 40):
+        with commands.transaction("Box", doc):
+            model.create(doc, features.Primitive, PrimitiveType="Box", Location=App.Placement(V(x, 0, 0), App.Rotation()),
+                         Operation="New body")
+            model.commit(doc)
+    yield 300
+    tree = shell._ui["tree"].widget()
+    tree.rebuild()
+    yield 100
+    menus = []
+
+    def right_click(o):
+        """Open the row's menu, note its items and close it (the menu runs its own loop)."""
+        def grab():
+            m = QtWidgets.QApplication.activePopupWidget()
+            menus.append({a.text(): a for a in (m.actions() if m else []) if a.text()})
+            if m:
+                m.close()
+        it = next(i for i in tree.walk() if tree.obj(i) is o)
+        tree.scrollToItem(it)
+        QtCore.QTimer.singleShot(300, grab)
+        tree.menu(tree.visualItemRect(it).center())
+        return menus[-1]
+
+    first = bodies()[0]
+    acts = right_click(first)
+    check("a body's browser menu offers Make component and Export", "Make component" in acts and "Export…" in acts,
+          sorted(acts))
+    acts["Make component"].trigger()
+    yield 300
+    comp = components.holder(first)
+    check("Make component from the browser puts the body in a new component, one undo step",
+          comp is not None and doc.UndoNames[0] == "New component", (comp, doc.UndoNames[:2]))
+    tree.rebuild()
+    yield 100
+    second = [b for b in bodies() if b is not first][0]
+    acts = right_click(second)
+    acts["Export…"].trigger()
+    yield 300
+    p = exportpanel._panel[0]
+    check("Export from the browser opens the Export panel on that body",
+          p.dock.isVisible() and p.objects() == [second] and "1 part" in p.what.text(), (p.what.text(),))
+    Gui.Selection.clearSelection()
+    yield 100
+    check("with nothing picked, it offers everything shown", set(p.objects()) == {comp, second}, p.what.text())
+    p.format.setCurrentText("STL")
+    p.files.setCurrentText("One file per part")
+    yield 100
+    check("the mesh fineness shows for STL", p.fine.isVisible())
+    out = tempfile.mkdtemp(prefix="kovac-export-gui-")
+    real_save = QtWidgets.QFileDialog.getSaveFileName
+    QtWidgets.QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (os.path.join(out, "parts"), ""))
+    try:
+        press(p.go)
+        yield 300
+    finally:
+        QtWidgets.QFileDialog.getSaveFileName = real_save
+    files = sorted(os.listdir(out))
+    check("Export writes one STL per part, named after it", len(files) == 2 and all(f.endswith(".stl") for f in files), files)
+    p.dock.hide()
+
 
 SEGMENTS = [("bracket", seg_bracket), ("curve3d", seg_curve3d), ("move", seg_move), ("offset", seg_offset),
-            ("assembly", seg_assembly)]
+            ("assembly", seg_assembly), ("copies", seg_copies), ("projection", seg_projection),
+            ("export", seg_export)]
 
 
 def scenario():
